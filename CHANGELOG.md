@@ -18,6 +18,13 @@ Textual, or in a schema can invalidate.
 - **`aut json`** — the same snapshot the board draws, from one code path.
 - **`aut cbut|ocut|qcut`** — skip the board and exec the tracker.
 
+### Fixed
+
+- **`install.sh` refuses before it builds anything.** The symlink guard used to run
+  after the venv step, so a refused install still left a venv behind and read like
+  a half-success. The guard now runs first, and the symlink step is a single
+  `rm -f` + `ln -s`.
+
 ### Decisions worth remembering
 
 - **Read-only connections, always** (`mode=ro`). The board must not corrupt an

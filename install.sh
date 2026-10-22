@@ -32,6 +32,15 @@ REPO_DIR="$(cd "$(dirname "${SELF:-${BASH_SOURCE[0]}}")" && pwd)"
 cd "$REPO_DIR"
 
 BIN_DIR="${AUT_BIN_DIR:-$HOME/.local/bin}"
+DST="$BIN_DIR/aut"
+
+# Refuse before doing any work: a venv built and then a refused symlink is a
+# half-install that looks like a success in the transcript.
+if [ -e "$DST" ] && [ ! -L "$DST" ] && [ "$FORCE" -ne 1 ]; then
+  echo "install.sh: refusing to replace '$DST' (exists and is not a symlink)" >&2
+  echo "  move or delete it first, or re-run with --force" >&2
+  exit 1
+fi
 
 # --- 1. TUI virtualenv -----------------------------------------------------
 VENV="$REPO_DIR/.venv"
@@ -60,15 +69,8 @@ else
 fi
 
 # --- 2. symlink the entry point --------------------------------------------
-DST="$BIN_DIR/aut"
-if [ -e "$DST" ] && [ ! -L "$DST" ] && [ "$FORCE" -ne 1 ]; then
-  echo "install.sh: refusing to replace '$DST' (exists and is not a symlink)" >&2
-  echo "  move or delete it first, or re-run with --force" >&2
-  exit 1
-fi
 mkdir -p "$BIN_DIR"
-[ -L "$DST" ] && rm -f "$DST"
-[ -e "$DST" ] && rm -f "$DST"
+rm -f "$DST"
 ln -s "$REPO_DIR/bin/aut" "$DST"
 echo "  $DST -> $REPO_DIR/bin/aut"
 
