@@ -4,6 +4,46 @@ Original project, **no upstream**. This records the decisions that are not
 obvious from the code — the ones a change in one of the three trackers, in
 Textual, or in a schema can invalidate.
 
+## 0.4.0
+
+The board is driven from its footer now: every tab lists exactly the keys it
+answers, and `r` no longer leaves the screen.
+
+### Changed
+
+- **The footer is per-tab.** `AutApp.check_action` decides both whether a binding
+  is drawn and whether the key fires, so `s` is gone from Sources, `g` from every
+  tab but Tokens, and `/` from every tab without a table. The "this tab has no
+  sort order" notifications went with them: a key that cannot act is not offered.
+- **`⏎ Open` is in the footer on every table tab.** Textual binds enter on
+  `DataTable` with `show=False`, so the one key that opens a row was the one key
+  missing from the list; a two-line `Table(DataTable)` subclass re-declares the
+  same `select_cursor` action under a visible name.
+- **`r` syncs in the background.** It used to call `app.suspend()` once per
+  tracker, so one key press read as three restarts. The syncs now run as captured
+  subprocesses (`asyncio.create_subprocess_exec`, `SYNC_TIMEOUT_S = 300`): the
+  status line names the tracker and step (`syncing CodeBuddy 1/3`), `r` leaves the
+  footer while it runs, and the active tab is re-read once at the end.
+- **The Dashboard has no selection.** `↑`/`↓` and `enter` are gone, along with the
+  reverse-video row and `open_tokens_for`; its caption names the window instead
+  (`6 models · 0 skills in this window · last call 18s ago`).
+
+### Removed
+
+- The app-level `enter` → `open_row` binding. It never fired — a focused
+  `DataTable`'s own enter binding shadows the app's — which is why the footer
+  entry had to come from the table in the first place.
+
+### Decisions worth remembering
+
+- **`check_action` is the single place a key's applicability lives.** It answers
+  for the footer and for dispatch at once, so a tab-specific key costs one branch
+  there instead of a "not on this tab" notification inside the action.
+- **Suspend is for handing over the terminal, not for running a command.**
+  `enter` on Sources still suspends (the child owns the screen); `r` does not
+  (the child owns nothing the user needs to watch), and it gets a timeout because
+  a sync that never returns must not wedge the board.
+
 ## 0.3.2
 
 ### Added

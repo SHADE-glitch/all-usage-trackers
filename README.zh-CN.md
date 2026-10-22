@@ -33,7 +33,7 @@
 ```text
  aut · all usage trackers                                       📅 Custom…   Today ▾
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 5 models · 0 skills · ↑↓ pick a model · enter opens Tokens for dfmodel
+ 5 models · 0 skills in this window · last call 8m ago
  ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
  │ Window                                                                                         │
  │ 144.19M tokens   ↑330% vs 33.51M   ·   122 sessions · 5,377 calls · 1 active day               │
@@ -57,7 +57,7 @@
  │  deepseek-v4.1-flash-fr    301K █░░░░░  0%   │ │    8m ago  CodeBuddy  deepseek-v    198K      │
  ╰──────────────────────────────────────────────╯ ╰───────────────────────────────────────────────╯
  3 of 3 indexes · 87.2 MB · synced 0s ago
- tab Next tab  shift+tab Prev tab  q Quit  r Sync now  s Sort  / Filter  d Date  g Group  ? Help
+ tab Next tab  shift+tab Prev tab  q Quit  r Sync now  d Date  ? Help
 ```
 
 ## 按键
@@ -71,15 +71,18 @@
 | `s` | 循环排序 —— 表格上方的状态行会写明（`sort: total ▼ (s)`） |
 | `/` | 过滤行（`esc` 清除） |
 | `d` | 时间范围 —— 预设或完整日历选择器 |
-| `enter` | 打开选中行的详情；在 Dashboard 上则打开选中模型的 Tokens |
-| `↑` `↓` | 仅 Dashboard：挑选模型 |
+| `enter` | 打开选中行的详情（表格 tab；在 Sources 上把终端交给那家自己的 TUI） |
 | `g` | Tokens：按模型 → 模型 × 来源 → 按来源 |
-| `r` | 立即同步三家（跑它们自己的 `sync`） |
+| `r` | 立即同步三家 —— 跑它们自己的 `sync`，在后台 |
 | `?` `q` | 帮助 / 退出 |
+
+底部那一行就是按键清单，而且是按 tab 变的：Sources 没有 `s`，`g` 只出现在 Tokens，`/` 只在有表格的 tab。当前 tab 上做不了事的键既不显示也不响应，所以底栏不会挂一个按下去只会说"这里没有"的键。
 
 每个 tab 各记各的时间窗，和三家的行为一致：Dashboard / Tokens / Usage 默认今天，Tools 默认一周，Skills 默认一个月（skill 很少，一周往往只有一两次调用）。
 
 屏幕布局也照三家：**状态行在表格上方**（行数、排序、分组、合计），底部一行是数据来源（读了几份索引、多大、多久前同步），最下面一行是按键提示。
+
+`r` 在板子背后跑三家的 sync，不再把终端交出去：状态行会写正在同步哪一家（`syncing CodeBuddy 1/3`），同步期间 `r` 从底栏消失，结束后只重读当前 tab 一次。Dashboard 是只读摘要 —— 没有选中、也没有 `enter`，因为它上面每个数字在自己的 tab 里都只差一次按键。
 
 ## 怎么读这些数字
 

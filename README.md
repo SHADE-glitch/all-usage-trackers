@@ -33,7 +33,7 @@
 ```text
  aut · all usage trackers                                       📅 Custom…   Today ▾
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 5 models · 0 skills · ↑↓ pick a model · enter opens Tokens for dfmodel
+ 5 models · 0 skills in this window · last call 8m ago
  ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
  │ Window                                                                                         │
  │ 144.19M tokens   ↑330% vs 33.51M   ·   122 sessions · 5,377 calls · 1 active day               │
@@ -57,7 +57,7 @@
  │  deepseek-v4.1-flash-fr    301K █░░░░░  0%   │ │    8m ago  CodeBuddy  deepseek-v    198K      │
  ╰──────────────────────────────────────────────╯ ╰───────────────────────────────────────────────╯
  3 of 3 indexes · 87.2 MB · synced 0s ago
- tab Next tab  shift+tab Prev tab  q Quit  r Sync now  s Sort  / Filter  d Date  g Group  ? Help
+ tab Next tab  shift+tab Prev tab  q Quit  r Sync now  d Date  ? Help
 ```
 
 ## Keys
@@ -71,15 +71,18 @@ The shared keys are the tracker family's, so a habit learned in `cbut` works her
 | `s` | cycle the sort order — the caption above the table names it (`sort: total ▼ (s)`) |
 | `/` | filter rows ( `esc` clears) |
 | `d` | date range — presets or the custom calendar picker |
-| `enter` | open the selected row's detail; on the Dashboard, open Tokens for the picked model |
-| `↑` `↓` | Dashboard only: pick a model |
+| `enter` | open the selected row's detail (the table tabs; on Sources it hands the terminal to that tracker) |
 | `g` | Tokens: by model → model × tracker → tracker |
-| `r` | sync the three trackers now (runs their own `sync`) |
+| `r` | sync the three trackers now — their own `sync`, in the background |
 | `?` `q` | help / quit |
+
+The footer is the key list, and it is per-tab: `s` is absent on Sources, `g` appears only on Tokens, `/` only where there is a table. A key that cannot do anything on the current tab is neither shown nor listened for, so the footer never advertises a key that would answer "nothing here".
 
 Every tab remembers its own window, as the trackers do: Dashboard, Tokens and Usage open on today, Tools on the week, Skills on the month (skills are rare enough that a week is often one call each).
 
 The screen is laid out like the three trackers: the state line (rows, sort, grouping, totals) sits **above** the table, the bottom line is provenance — how many indexes were read, how big they are, when they were last synced — and the footer lists the keys.
+
+`r` runs the three syncs behind the board instead of handing the terminal over: the status line names the tracker being synced (`syncing CodeBuddy 1/3`), `r` leaves the footer while it runs, and the tab is re-read once at the end. The Dashboard is a read-only summary — it has no selection and no `enter`, because every number on it is one keystroke away on its own tab.
 
 ## Reading the numbers
 

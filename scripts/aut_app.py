@@ -13,6 +13,7 @@ that lives on the Sources tab, where a row means a tool rather than a number.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import shutil
 import subprocess
 import sys
@@ -47,6 +48,10 @@ DEFAULT_RANGES = {
 }
 
 TAB_ORDER = ("dashboard", "tools", "skills", "tokens", "usage", "sources")
+
+# A tracker's sync parses every log it has not seen yet, so it can be slow — but
+# a sync that never returns must not wedge the board.
+SYNC_TIMEOUT_S = 300
 
 # One colour per source, used by every tab. Scanning for "which tool" should be a
 # colour match, not a word match.
@@ -137,6 +142,17 @@ def _delta(now: int, prev: int | None) -> Text:
     return Text(f"{arrow}{abs(change):.0f}%", style=style)
 
 
+class Table(DataTable):
+    """DataTable with a visible enter binding.
+
+    Textual's own binding for enter is `show=False`, so the one key that opens
+    a row's detail was the one key missing from the footer. The action is the
+    same `select_cursor`; only its name and visibility change.
+    """
+
+    BINDINGS = [Binding("enter", "select_cursor", "Open")]
+
+
 class HelpScreen(ModalScreen[None]):
     BINDINGS = [Binding("escape,q,question_mark,enter", "dismiss", "close")]
 
@@ -210,7 +226,7 @@ class TablePane(Pane):
     def compose(self) -> ComposeResult:
         yield Static("", id="note")
         yield Input(placeholder="filter…", id="filter")
-        yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
+        yield Table(id="table", cursor_type="row", zebra_stripes=True)
 
     def on_mount(self) -> None:
         self._paint_columns(self.app.size.width)
@@ -590,12 +606,6 @@ class DashboardPane(Pane):
     TAB_KEY = "dashboard"
     can_focus = True
 
-    BINDINGS = [
-        Binding("up", "move(-1)", "up", show=False),
-        Binding("down", "move(1)", "down", show=False),
-        Binding("enter", "open_row", "open", show=False),
-    ]
-
     DEFAULT_CSS = """
     DashboardPane { height: 1fr; padding: 0 1; }
     DashboardPane #note { height: auto; color: $text-muted; }
@@ -616,7 +626,6 @@ class DashboardPane(Pane):
         self._models: list[model.ModelTotal] = []
         self._skills: list = []
         self._recent: list = []
-        self._sel = 0
 
     def compose(self) -> ComposeResult:
         yield Static(id="note")
@@ -637,8 +646,6 @@ class DashboardPane(Pane):
         self._skills = sorted(model.entity_rows("skills", start, end),
                               key=lambda r: (r.calls, r.last_used or 0), reverse=True)
         self._recent = model.call_rows(start, end, limit=6)
-        if self._sel >= len(self._models):
-            self._sel = max(0, len(self._models) - 1)
         self._paint()
 
     # -- drawing ------------------------------------------------------------
@@ -662,10 +669,9 @@ class DashboardPane(Pane):
         return width, chart_h, rows
 
     def _note_text(self) -> Text:
-        out = Text(f"{len(self._models)} models · {len(self._skills)} skills")
-        out.append(" · ↑↓ pick a model")
-        if self._models:
-            out.append(f" · enter opens Tokens for {self._models[self._sel].model}")
+        out = Text(f"{len(self._models)} models · {len(self._skills)} skills in this window")
+        if self._recent:
+            out.append(f" · last call {fmt_age(self._recent[0].ts)}")
         return out
 
     def _paint(self) -> None:
@@ -741,8 +747,8 @@ class DashboardPane(Pane):
         models.append(f"top models · {fmt_tokens(total)}\n", style="bold")
         if not self._models:
             models.append("  nothing in this window", style="dim")
-        for i, item in enumerate(self._models[:rows]):
-            line = Text(style="reverse" if i == self._sel else "")
+        for item in self._models[:rows]:
+            line = Text()
             line.append(f" {item.model[:name_w]:<{name_w}}")
             line.append(f" {fmt_tokens(item.total):>7} ")
             line.append_text(share_bar(item.total, self._models[0].total, width=6,
@@ -803,21 +809,6 @@ class DashboardPane(Pane):
 
     # -- keys ---------------------------------------------------------------
 
-    def action_move(self, delta: int) -> None:
-        if not self._models:
-            return
-        self._sel = max(0, min(len(self._models) - 1, self._sel + delta))
-        width, _chart_h, rows = self._layout()
-        self.query_one("#note", Static).update(self._note_text())
-        self._paint_tops(rows, width)
-
-    def action_open_row(self) -> None:
-        self.open_selected()
-
-    def open_selected(self) -> None:
-        if self._models:
-            self.app.open_tokens_for(self._models[self._sel].model)
-
 
 
 class SourcesPane(Pane):
@@ -845,7 +836,7 @@ class SourcesPane(Pane):
 
     def compose(self) -> ComposeResult:
         yield Static(id="note")
-        yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
+        yield Table(id="table", cursor_type="row", zebra_stripes=True)
 
     def on_mount(self) -> None:
         self._paint_columns(self.app.size.width)
@@ -948,7 +939,6 @@ class SourcesPane(Pane):
             self.app.open_tracker(self._snaps[index].key)
 
 
-
 class CallsTable(Vertical):
     """A plain list of calls, used by both detail screens."""
 
@@ -964,7 +954,7 @@ class CallsTable(Vertical):
         self._rows = rows
 
     def compose(self) -> ComposeResult:
-        yield DataTable(id="calls", cursor_type="row", zebra_stripes=True)
+        yield Table(id="calls", cursor_type="row", zebra_stripes=True)
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
@@ -1089,7 +1079,6 @@ class AutApp(App[None]):
         Binding("slash", "filter", "Filter"),
         Binding("d", "date_range", "Date"),
         Binding("g", "group", "Group"),
-        Binding("enter", "open_row", "Open"),
         Binding("1", "goto_tab(0)", "1", show=False),
         Binding("2", "goto_tab(1)", "2", show=False),
         Binding("3", "goto_tab(2)", "3", show=False),
@@ -1104,6 +1093,8 @@ class AutApp(App[None]):
         super().__init__()
         self.windows = dict(DEFAULT_RANGES)
         self._synced_ms = int(time.time() * 1000)
+        self._syncing = False
+        self._sync_step = ""
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="bar"):
@@ -1192,12 +1183,15 @@ class AutApp(App[None]):
                 total += path.stat().st_size
             else:
                 missing += 1
+        if self._syncing and self._sync_step:
+            parts.append(f"[b]{self._sync_step}[/b]")
         parts.append(f"{len(SOURCES) - missing} of {len(SOURCES)} indexes")
         if total:
             parts.append(_human_size(total))
         if missing:
             parts.append(f"{missing} missing")
-        parts.append(f"synced {fmt_age(self._synced_ms)}")
+        if not self._syncing:
+            parts.append(f"synced {fmt_age(self._synced_ms)}")
         self.query_one("#status", Static).update(" · ".join(parts))
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
@@ -1214,24 +1208,81 @@ class AutApp(App[None]):
         if event.button.id == "custom":
             self.action_date_range()
 
+    def check_action(self, action: str, parameters: tuple) -> bool:
+        """Which bindings exist on the current tab.
+
+        The footer is the key list, so a key that cannot do anything on this tab
+        must not be in it: `s` on Sources and `g` on anything but Tokens are
+        the obvious ones. Returning False also stops the key from firing, which
+        is why the old "this tab has no sort order" notices are gone.
+        """
+        try:
+            pane = self.pane()
+        except Exception:
+            return True
+        if action == "sync":
+            return not self._syncing
+        if action == "sort":
+            return bool(getattr(pane, "SORT_FIELDS", ()))
+        if action == "group":
+            return isinstance(pane, TokensPane)
+        if action in ("filter", "clear_filter"):
+            return isinstance(pane, TablePane)
+        return True
+
     # -- actions -----------------------------------------------------------
 
-    def action_sync(self) -> None:
-        for source in SOURCES:
-            if shutil.which(source.binary) is None:
-                self.notify(f"{source.binary} is not on PATH", severity="warning")
-                continue
-            with self.suspend():
-                print(f"\naut · syncing {source.label} ({source.binary} sync)\n", flush=True)
-                subprocess.call(source.sync_argv())
-        self._synced_ms = int(time.time() * 1000)
-        self.reload_active()
+    async def action_sync(self) -> None:
+        """Run the three trackers' own sync without leaving the board.
+
+        `r` used to suspend the TUI three times — once per tracker — so a sync
+        read as a restart. The child process now runs behind the board with its
+        output captured; the status line names the tracker being synced and the
+        tab refreshes once at the end.
+        """
+        if self._syncing:
+            return
+        self._syncing = True
+        self.refresh_bindings()      # hides "r" while it runs
+        try:
+            for index, source in enumerate(SOURCES, start=1):
+                if shutil.which(source.binary) is None:
+                    continue
+                self._sync_step = f"syncing {source.label} {index}/{len(SOURCES)}"
+                self._update_bar(self.windows.get(self.pane().TAB_KEY, "1d"))
+                code, tail = await self._run_sync(source)
+                if code != 0:
+                    self.notify(f"{source.binary} sync exited {code}"
+                                + (f": {tail}" if tail else ""),
+                                severity="warning", timeout=8)
+        finally:
+            self._syncing = False
+            self._sync_step = ""
+            self._synced_ms = int(time.time() * 1000)
+            self.refresh_bindings()
+            self.reload_active()
+
+    async def _run_sync(self, source) -> tuple[int, str]:
+        """Run one tracker's sync; return (exit code, last line of output)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *source.sync_argv(),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        except OSError as exc:
+            return 127, str(exc)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=SYNC_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return 124, f"timed out after {SYNC_TIMEOUT_S}s"
+        lines = out.decode("utf-8", "replace").strip().splitlines()
+        return proc.returncode or 0, (lines[-1] if lines else "")
 
     def action_sort(self) -> None:
         pane = self.pane()
-        if not getattr(pane, "SORT_FIELDS", ()):
-            self.notify("this tab has no sort order", severity="information")
-            return
         pane.action_sort()
         self._update_bar(self.windows.get(pane.TAB_KEY, "1d"))
 
@@ -1241,14 +1292,8 @@ class AutApp(App[None]):
     def action_clear_filter(self) -> None:
         self.pane().clear_filter()
 
-    def action_open_row(self) -> None:
-        self.pane().open_selected()
-
     def action_group(self) -> None:
         pane = self.pane()
-        if not isinstance(pane, TokensPane):
-            self.notify("g groups the Tokens tab only", severity="information")
-            return
         pane.group_toggle()
         self._update_bar(self.windows.get(pane.TAB_KEY, "1d"))
 
@@ -1309,21 +1354,6 @@ class AutApp(App[None]):
         self._synced_ms = int(time.time() * 1000)
         self._update_bar(window)
         self._focus_table()
-
-    def open_tokens_for(self, model_name: str) -> None:
-        """Jump from a dashboard row to the rows behind it."""
-        pane = next((p for p in self.query(Pane) if p.TAB_KEY == "tokens"), None)
-        if not isinstance(pane, TokensPane):
-            return
-        self.query_one(TabbedContent).active = "tab-tokens"
-        box = pane.query_one("#filter", Input)
-        box.add_class("-on")
-        box.value = model_name          # fires on_input_changed, which reloads
-        # The keyboard belongs on the rows, not in the box: the filter is shown
-        # so it can be seen and cleared with esc, but the next key press should
-        # move the selection.
-        pane.query_one(DataTable).focus()
-        self._update_bar(self.windows.get("tokens", "1d"))
 
 
 def main(argv: list[str] | None = None) -> int:

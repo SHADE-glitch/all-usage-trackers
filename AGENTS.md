@@ -61,6 +61,17 @@ This repository is public.
   names the sort and the grouping (`sort: total ▼ (s)`); the line under the table
   says how many indexes were read, how big they are and when they were synced.
   This is the three trackers' layout, and the reason `s` is discoverable at all.
+- **The footer only lists keys that work on the tab.** `AutApp.check_action` is
+  the one place a key's applicability lives: it answers for the footer and for
+  dispatch at once. Do not re-add a "this tab has no sort order" notification —
+  a key that cannot act must not be offered. A binding a focused widget hides
+  (Textual's own `enter` on `DataTable`) is re-declared in the `Table` subclass,
+  not duplicated at app level: the app-level copy never fires.
+- **`suspend()` is for handing over the terminal, not for running a command.**
+  `enter` on Sources suspends because the child owns the screen; `r` must not,
+  because the child owns nothing the user needs to watch. Background work is
+  `asyncio.create_subprocess_exec` with output captured, a hard timeout, and one
+  reload at the end — the status line, not a restart, reports progress.
 
 ## Commands
 
@@ -79,6 +90,7 @@ scripts/aut_sources.py  the adapters (SOURCES) and the Snapshot shape
 scripts/aut_model.py    cross-tool aggregation: tokens, entities, timeline, kpis
 scripts/aut_picker.py   the custom date-range picker (ported from the family)
 scripts/aut_app.py      the Textual board: six panes + two detail screens
+scripts/aut_chart.py    the one stacked chart and the share bar, shared by every pane
 scripts/aut_db.py       read-only connections, formatting, sparkline
 scripts/aut_report.py   headless json / sync
 scripts/tests/          adapters + aggregation against temp databases, board smoke tests
