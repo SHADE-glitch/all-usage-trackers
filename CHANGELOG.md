@@ -62,6 +62,19 @@ One token number everywhere, and a dashboard that fits its content.
 - The per-call block under the model list drops its call count below 45 columns
   of card width instead of wrapping: the per-call figure is what the block is
   for, and the count is already in the KPI strip above.
+- **Rows are sized from the card, and the numbers stop growing.** At All time a
+  model total is ten digits — nine characters as "10151.90M" — while the row
+  was laid out for seven, so the percentage wrapped onto the next line and read
+  as an entry of its own. Token counts now scale to B and T ("21.21B"), and the
+  name field is whatever the card's *measured* width leaves after the origin,
+  the number, the bar and the percentage. When the card is too narrow for all
+  four, the bar goes first (the percentage carries the same fact), then the
+  origin tag, then the percentage; the name absorbs the slack, so a row cannot
+  wrap at any width. The same measurement replaces the pane-width formula, which
+  was one column wide whenever the pane scrolled.
+- **The KPI line drops whole facts instead of wrapping them,** and the Tokens
+  caption uses the short grouping label below 100 columns. Both were 2-20 cells
+  too wide at 80.
 
 ### Tests
 

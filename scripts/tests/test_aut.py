@@ -283,6 +283,13 @@ class TestFormatting(unittest.TestCase):
     def test_empty_sparkline(self):
         self.assertEqual(aut_db.sparkline([]), "")
 
+    def test_token_numbers_scale_past_megabytes(self):
+        # The board passed 21,000M this month: a nine-character cell pushed the
+        # percentage beside it onto the next line.
+        self.assertEqual(aut_db.fmt_tokens(21_207_640_000), "21.21B")
+        self.assertEqual(aut_db.fmt_tokens(1_500_000_000_000), "1.50T")
+        self.assertEqual(aut_db.fmt_tokens(999_000_000), "999.00M")
+
 
 try:
     import textual  # noqa: F401
@@ -615,6 +622,55 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             # card.size is already the content box, borders and padding excluded.
             for line in text.splitlines():
                 self.assertLessEqual(len(line), card.size.width, line)
+
+    async def test_a_grown_total_keeps_its_row_on_one_line(self):
+        from textual.widgets import Static
+
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 45)) as pilot:
+            pane = app.pane()
+            # 10.15B formats as nine characters; the row used to be laid out
+            # for seven, which pushed "48%" onto the line below.
+            pane._models = [
+                model.ModelTotal("deepseek-v4.1-flash", total=10_151_900_000,
+                                 per_source={"cbut": 1, "ocut": 1, "qcut": 1},
+                                 requests=10),
+                model.ModelTotal("minimax-m3.1-flash-free", total=5_255_378_300,
+                                 per_source={"ocut": 1}, requests=10),
+            ]
+            pane._paint()
+            await pilot.pause()
+            card = app.query_one("#top-models", Static)
+            text = str(card.render())
+            for line in text.splitlines():
+                self.assertLessEqual(len(line), card.size.width, line)
+            self.assertIn("10.15B", text)
+            self.assertIn("66%", text)
+
+    async def test_a_narrow_card_gives_up_the_tag_before_the_share(self):
+        from textual.widgets import Static
+
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(80, 30)) as pilot:
+            pane = app.pane()
+            pane._models = [
+                model.ModelTotal("deepseek-v4.1-flash", total=10_151_900_000,
+                                 per_source={"cbut": 1}, requests=10),
+            ]
+            pane._paint()
+            await pilot.pause()
+            card = app.query_one("#top-models", Static)
+            text = str(card.render())
+            for line in text.splitlines():
+                self.assertLessEqual(len(line), card.size.width, line)
+            # At 33 cells something has to go: the origin tag first, because
+            # the percentage is the fact the list is ranked by.
+            self.assertIn("%", text)
+            self.assertNotIn("cbut", text)
 
     def test_usage_total_sits_ahead_of_the_input_split(self):
         from aut_app import TokensPane

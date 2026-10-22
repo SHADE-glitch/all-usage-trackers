@@ -45,8 +45,19 @@ def spark_width(days: int) -> int:
 
 
 def fmt_tokens(value: int | None) -> str:
+    """A token count, scaled so the field stops growing.
+
+    Two decimals at every scale, and the scale rises with the number: the board
+    passed 21,000M this month, and a nine-character cell pushed the percentage
+    beside it onto a second line. A field that tops out at "999.99B" leaves room
+    for years of growth without another layout change.
+    """
     if value is None:
         return "—"
+    if value >= 1_000_000_000_000:
+        return f"{value / 1_000_000_000_000:.2f}T"
+    if value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.2f}B"
     if value >= 1_000_000:
         return f"{value / 1_000_000:.2f}M"
     if value >= 1_000:

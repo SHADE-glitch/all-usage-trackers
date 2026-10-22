@@ -72,6 +72,13 @@ This repository is public.
 - **Cards grow, then the pane scrolls.** A list card takes the height its rows
   need — never a fixed row count that silently hides the rest — and the pane
   scrolls once the screen is full.
+- **A row is sized from its card, never from a constant.** The budget is the
+  card's measured content width (less one column for the scrollbar the pane may
+  grow), and every field in the row is measured from the data: a nine-character
+  total in a seven-cell field wrapped the percentage onto the next line. What
+  gives way, in order: the bar, the origin tag, the percentage — the name
+  absorbs the slack. The same rule applies to the KPI line, which drops whole
+  facts rather than wrapping one.
 - **Keep the three TUIs untouched.** Going deeper is `suspend()` + the tracker's
   own binary, never a re-implementation of its views.
 - **Keep the keys aligned with the family.** `r` syncs, `s` sorts, `/` filters,

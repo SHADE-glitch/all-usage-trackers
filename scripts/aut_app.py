@@ -90,6 +90,18 @@ HELP = """
   which has no cross-tool equivalent here.
 """
 
+def _clip(text: str, width: int) -> str:
+    """Exactly `width` cells, with the cut marked.
+
+    A panel row is laid out by arithmetic, so a name one cell too long is not a
+    cosmetic problem: it wraps the row and the number below it reads as another
+    entry.
+    """
+    if width <= 0:
+        return ""
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
 def _project(path: str, width: int = 36) -> Text:
     """A project path as one table cell.
 
@@ -493,8 +505,12 @@ class TokensPane(TablePane):
 
     def extra_note(self) -> str:
         total = sum(r.total for r in self._rows)
-        return (f"grouping: {self.MODE_LABELS[self.mode]} (g) · "
-                f"total {fmt_tokens(total)}")
+        label = self.MODE_LABELS[self.mode]
+        if self.size.width and self.size.width < 100:
+            # The long label is what wraps the caption at 80 columns; the mode
+            # is still named, without the clause explaining the merge.
+            label = label.split(",")[0]
+        return (f"grouping: {label} (g) · total {fmt_tokens(total)}")
 
     def open_selected(self) -> None:
         row = self.selected()
@@ -675,11 +691,11 @@ class DashboardPane(Pane):
     # -- drawing ------------------------------------------------------------
 
     def on_resize(self, event) -> None:
-        # A pane is measured after it is first composed, so the first paint can
-        # happen at width 0 and leave a chart sized for 80 columns on a 130
-        # column terminal. Repaint when the real size arrives.
+        # Repaint after the layout lands: the rows are sized to the cards'
+        # measured width, and a child is not placed when the pane itself
+        # resizes. Painting from on_resize directly would use the old width.
         if self.is_mounted:
-            self._paint()
+            self.call_after_refresh(self._paint)
 
     def _width(self) -> int:
         """The pane's own width, falling back before the first measure."""
@@ -693,8 +709,10 @@ class DashboardPane(Pane):
 
     def _paint(self) -> None:
         width = self._width()
-        # A card spends two columns on its border and two on padding.
-        inner = width - 4
+        # The card's content box, less the column a scrollbar may take: the
+        # pane's width is not what the text is drawn into.
+        card = self.query_one("#kpi", Static)
+        inner = max(24, (card.size.width or width - 4) - 1)
         self.query_one("#note", Static).update(self._note_text())
         self.query_one("#kpi", Static).update(self._kpi_text(inner))
         self._paint_tops(width)
@@ -712,7 +730,16 @@ class DashboardPane(Pane):
         if k.active_days:
             bits.append(f"{k.active_days} active "
                         f"{'day' if k.active_days == 1 else 'days'}")
-        out.append("   ·   " + " · ".join(bits) + "\n")
+        # Drop whole facts from the tail until the line fits, rather than
+        # letting the last one wrap under the total: a wrapped fact reads as a
+        # second headline.
+        used = len(out.plain) - out.plain.rfind("\n") - 1
+        while bits and used + 7 + sum(len(b) for b in bits) \
+                + 3 * (len(bits) - 1) > width:
+            bits.pop()
+        if bits:
+            out.append("   ·   " + " · ".join(bits))
+        out.append("\n")
         if total <= 0:
             out.append("nothing recorded in this window", style="dim")
             return out
@@ -734,64 +761,122 @@ class DashboardPane(Pane):
             out.append(f" {pct(value, total):>3}")
         return out
 
+    # Fixed parts of a ranked row, in cells. The name takes what is left; the
+    # bar, then the percentage, are what give way when the numbers grow.
+    ORIGIN_W = 9
+    BAR_W = 6
+    PCT_W = 4
+
+    @classmethod
+    def _row_widths(cls, budget: int, num_w: int, head_w: int,
+                    tail_w: int) -> tuple[int, bool, bool, bool]:
+        """Name width, and which of the origin, the bar and the share still fit.
+
+        Widths come from the data, not from a guess: a nine-character total
+        ("10151.90M") used to push the percentage onto the next line, where it
+        read as a row of its own. Something has to give as the card narrows,
+        in the order that costs the reader least: the bar (the percentage
+        carries the same fact), then the origin tag, then the percentage.
+        """
+        for bar, share, head in ((True, True, True), (False, True, True),
+                                 (False, True, False), (False, False, False)):
+            fixed = (2 + num_w + (head_w + 1 if head and head_w else 0)
+                     + (1 + cls.BAR_W if bar else 0)
+                     + (1 + cls.PCT_W if share else 0) + tail_w)
+            if budget - fixed >= 10:
+                return budget - fixed, bar, share, head and bool(head_w)
+        return max(0, budget - fixed), False, False, False
+
     def _paint_tops(self, width: int) -> None:
-        half = max(30, (width - 1) // 2 - 4)
-        # The origin tag costs nine columns; the model name is what yields them.
-        name_w = max(10, half - 32)
+        models_card = self.query_one("#top-models", Static)
+        skills_card = self.query_one("#top-skills", Static)
+        # The card's own content box, less one column for the scrollbar the
+        # pane may grow: the two cards split an odd column unevenly, and the
+        # left one loses another when the pane starts scrolling. Sizing rows
+        # from the pane's width is how a row ends up one cell too wide.
+        fallback = max(30, (width - 1) // 2 - 4)
+        models_w = max(24, (models_card.size.width or fallback) - 1)
+        skills_w = max(24, (skills_card.size.width or fallback) - 1)
 
         total = sum(m.total for m in self._models)
+        numbers = [fmt_tokens(m.total) for m in self._models]
+        num_w = max([len(n) for n in numbers] + [7])
+        name_w, bar, share, head = self._row_widths(models_w, num_w, self.ORIGIN_W, 0)
+
         models = Text()
         models.append(f"top models · {fmt_tokens(total)}\n", style="bold")
         if not self._models:
             models.append("  nothing in this window", style="dim")
-        for item in self._models:
+        for item, number in zip(self._models, numbers):
             origin = origin_label(item.per_source)
-            name = item.model
-            if len(name) > name_w:
-                name = name[: name_w - 1] + "…"
             line = Text()
-            line.append(f" {name:<{name_w}}")
-            line.append(f" {origin:<9}", style=SOURCE_STYLE.get(origin, "dim"))
-            line.append(f" {fmt_tokens(item.total):>7} ")
-            line.append_text(share_bar(item.total, self._models[0].total, width=6,
-                                       style=self._model_style(item)))
-            line.append(f" {pct(item.total, total):>3}\n")
+            line.append(f" {_clip(item.model, name_w):<{name_w}}")
+            if head:
+                line.append(f" {origin:<{self.ORIGIN_W}}",
+                            style=SOURCE_STYLE.get(origin, "dim"))
+            line.append(f" {number:>{num_w}}")
+            if bar:
+                line.append(" ")
+                line.append_text(share_bar(item.total, self._models[0].total,
+                                           width=self.BAR_W,
+                                           style=self._model_style(item)))
+            if share:
+                line.append(f" {pct(item.total, total):>{self.PCT_W}}")
+            line.append("\n")
             models.append_text(line)
 
         # Tokens per call is the number the split hides: a tracker can use fewer
         # tokens and still be the expensive one.
         if self._kpis.per_source_calls:
-            models.append("\nby tracker · tokens / call\n", style="bold")
+            rows = []
             for source in SOURCES:
                 tokens = self._kpis.per_source.get(source.key)
                 if tokens is None:
                     continue
                 calls = self._kpis.per_source_calls.get(source.key, 0)
                 per_call = f"{fmt_tokens(round(tokens / calls))}/call" if calls else "—"
+                rows.append((source, tokens, calls, per_call))
+            tok_w = max([len(fmt_tokens(r[1])) for r in rows] + [7])
+            call_w = max([len(f"{r[2]:,}") for r in rows] + [5])
+            per_w = max([len(r[3]) for r in rows] + [9])
+            full = 1 + 12 + 1 + tok_w + 2 + call_w + 6 + 2 + per_w
+            with_calls = models_w >= full
+            models.append("\nby tracker · tokens / call\n", style="bold")
+            for source, tokens, calls, per_call in rows:
                 line = Text()
                 line.append(f" {source.label:<12}", style=SOURCE_STYLE.get(source.key, ""))
-                if half >= 45:
-                    line.append(f" {fmt_tokens(tokens):>7}  {calls:>5,} calls  {per_call:>9}\n")
-                else:
-                    # Narrower than the full line: the per-call figure is what
-                    # this block is for, so the call count is what goes. It is
-                    # already in the KPI strip above.
-                    line.append(f" {fmt_tokens(tokens):>7}  {per_call:>9}\n")
+                line.append(f" {fmt_tokens(tokens):>{tok_w}}")
+                if with_calls:
+                    line.append(f"  {calls:>{call_w},} calls")
+                # The per-call figure is what this block is for, so the call
+                # count is what goes when the card is narrow; it is already in
+                # the KPI strip above.
+                line.append(f"  {per_call:>{per_w}}\n")
                 models.append_text(line)
         self.query_one("#top-models", Static).update(models)
 
         calls = sum(r.calls for r in self._skills)
+        call_nums = [f"{r.calls:,}" for r in self._skills]
+        ages = [fmt_age(r.last_used) for r in self._skills]
+        num2 = max([len(n) for n in call_nums] + [6])
+        age_w = max([len(a) for a in ages] + [8])
+        name2, bar2, share2, _ = self._row_widths(skills_w, num2, 0, 2 + age_w)
+
         side = Text()
         side.append(f"top skills · {calls:,} calls\n", style="bold")
         if not self._skills:
             side.append("  none in this window · d widens it\n", style="dim")
-        for item in self._skills:
+        for item, number, age in zip(self._skills, call_nums, ages):
             line = Text()
-            line.append(f" {item.name[:name_w]:<{name_w}}")
-            line.append(f" {item.calls:>6,} ")
-            line.append_text(share_bar(item.calls, self._skills[0].calls, width=6))
-            line.append(f" {pct(item.calls, calls):>3}  ")
-            line.append(fmt_age(item.last_used), style="dim")
+            line.append(f" {_clip(item.name, name2):<{name2}}")
+            line.append(f" {number:>{num2}}")
+            if bar2:
+                line.append(" ")
+                line.append_text(share_bar(item.calls, self._skills[0].calls,
+                                           width=self.BAR_W))
+            if share2:
+                line.append(f" {pct(item.calls, calls):>{self.PCT_W}}")
+            line.append(f"  {age:<{age_w}}", style="dim")
             line.append("\n")
             side.append_text(line)
         self.query_one("#top-skills", Static).update(side)
