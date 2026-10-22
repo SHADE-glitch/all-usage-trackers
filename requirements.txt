@@ -1,0 +1,3 @@
+# Runtime dependency of the interactive board (scripts/aut_app.py).
+# `aut json` and `aut sync` need only the Python standard library.
+textual>=8.2,<9

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# aut — one overview over the local usage trackers.
+#
+#   aut                 open the overview TUI
+#   aut cbut|ocut|qcut  jump straight into that tracker's own TUI
+#   aut sync [KEY...]   run the trackers' own sync commands (default: all three)
+#   aut json [--days N] print the combined snapshot as JSON (1 / 7 / 30 / 0=all)
+#   aut --help          this text
+#
+# The overview never parses a log and never writes a database: it reads the SQLite
+# index each tracker already built. Written in bash so it can still print a useful
+# error when the venv or the scripts are missing.
+#
+# Location-independent: resolves itself through symlinks, so this repo may live
+# anywhere and the ~/.local/bin/aut install may be a symlink back to it.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+SELF="${SELF:-${BASH_SOURCE[0]}}"
+REPO_DIR="$(cd "$(dirname "$SELF")/.." 2>/dev/null && pwd)" || REPO_DIR=""
+
+cmd="${1:-tui}"
+
+SCRIPTS="${AUT_SCRIPTS:-}"
+if [ -z "$SCRIPTS" ] || [ ! -d "$SCRIPTS" ]; then
+  if [ -n "$REPO_DIR" ] && [ -d "$REPO_DIR/scripts" ]; then
+    SCRIPTS="$REPO_DIR/scripts"
+  elif [ "$cmd" != "help" ] && [ "$cmd" != "-h" ] && [ "$cmd" != "--help" ]; then
+    echo "aut: no scripts directory found next to $SELF — set AUT_SCRIPTS" >&2
+    exit 1
+  fi
+fi
+
+# AUT_VENV may name a venv directory or a python binary.
+PY="${AUT_VENV:-}"
+if [ -n "$PY" ] && [ -x "$PY/bin/python" ]; then
+  PY="$PY/bin/python"
+elif [ -n "$PY" ] && [ -x "$PY" ]; then
+  :
+elif [ -n "$PY" ]; then
+  echo "aut: AUT_VENV='$PY' is neither a venv dir nor an executable" >&2
+  exit 1
+elif [ -n "$REPO_DIR" ] && [ -x "$REPO_DIR/.venv/bin/python" ]; then
+  PY="$REPO_DIR/.venv/bin/python"
+else
+  PY="python3"
+fi
+
+case "$cmd" in
+  tui|"")   shift || true; exec "$PY" "$SCRIPTS/aut_app.py" "$@" ;;
+  json|sync) shift || true; exec "$PY" "$SCRIPTS/aut_report.py" "$cmd" "$@" ;;
+  cbut|ocut|qcut)
+    shift || true
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "aut: $cmd is not on PATH — install that tracker first" >&2
+      exit 1
+    fi
+    exec "$cmd" "$@"
+    ;;
+  -h|--help|help)
+    # Print the leading comment block, so this text cannot drift from the file.
+    tail -n +2 "$SELF" | while IFS= read -r line; do
+      case "$line" in
+        \#*) line="${line#\#}"; printf '%s\n' "${line# }" ;;
+        *) break ;;
+      esac
+    done
+    ;;
+  *)
+    echo "aut: unknown command '$cmd' (try aut --help)" >&2
+    exit 2
+    ;;
+esac

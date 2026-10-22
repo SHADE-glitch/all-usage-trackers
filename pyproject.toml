@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "all-usage-trackers"
+version = "0.1.0"
+description = "One read-only overview over the local usage trackers (cbut, ocut, qcut): a summary board that hands the terminal to a tracker's own TUI and takes it back."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# The headless views (aut json / aut sync) are pure stdlib. The board's only
+# runtime dependency (textual) is listed in requirements.txt, the authoritative
+# flat list install.sh installs from; it is not duplicated here.
+dependencies = []
