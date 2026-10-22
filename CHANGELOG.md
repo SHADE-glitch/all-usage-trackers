@@ -46,6 +46,11 @@ One token number everywhere, and a dashboard that fits its content.
   "tokens" while every other number on the screen said something else.
 - **Recent calls** from the dashboard. It repeated the Usage tab's newest rows
   in a narrower box with no way to open them.
+- **The tokens-per-call block under the dashboard's model list.** It answered a
+  per-tracker question inside a card ranked by model, and the two numbers it
+  printed are already on the Sources tab (share, trend) and in the KPI strip
+  (per-tracker totals). The card is now only the ranked list its title
+  promises; `Kpis.per_source_calls` went with it, since nothing read it.
 
 ### Layout
 
@@ -59,9 +64,6 @@ One token number everywhere, and a dashboard that fits its content.
   `qcut`, `cbut+ocut`, `all`). The tag is nine columns and the model name gives
   them up, with an ellipsis once the name no longer fits — the row still fits
   the card at every width the two-column layout is used at.
-- The per-call block under the model list drops its call count below 45 columns
-  of card width instead of wrapping: the per-call figure is what the block is
-  for, and the count is already in the KPI strip above.
 - **Rows are sized from the card, and the numbers stop growing.** At All time a
   model total is ten digits — nine characters as "10151.90M" — while the row
   was laid out for seven, so the percentage wrapped onto the next line and read

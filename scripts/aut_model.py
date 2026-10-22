@@ -121,7 +121,6 @@ class Kpis:
     calls: int = 0
     active_days: int = 0
     per_source: dict[str, int] = field(default_factory=dict)
-    per_source_calls: dict[str, int] = field(default_factory=dict)
     prev_tokens: int | None = None
     prev_sessions: int | None = None
 
@@ -358,7 +357,6 @@ def kpis(start_ms: int | None, end_ms: int, _delta: bool = True) -> Kpis:
         tokens = int(row[0] or 0)
         out.tokens += tokens
         out.per_source[key] = tokens
-        out.per_source_calls[key] = int(row[1] or 0)
         out.calls += int(row[1] or 0)
         out.sessions += int(row[2] or 0)
         out.active_days = max(out.active_days, int(row[3] or 0))

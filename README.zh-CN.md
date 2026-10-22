@@ -34,30 +34,26 @@
  aut · all usage trackers                                                           📅 Custom…   Today                ▼
  Dashboard  Tools  Skills  Tokens  Usage  Sources
 ╸━━━━━━━━━╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- 8 models · 0 skills in this window · last call 5m ago
+ 5 models · 1 skills in this window · last call 6m ago
  ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
  │ Window                                                                                                             │
- │ 2567.24M usage total   ↑134% vs 1098.76M   ·   271 sessions · 16,298 calls · 1 active day                          │
- │ CodeBuddy █░░░░░░░ 311.22M 12%   OpenCode █████░░░ 1599.99M 62%   Qoder CN ██░░░░░░ 656.02M 26%                    │
+ │ 3.13B usage total   ↑49% vs 2.10B   ·   271 sessions · 19,894 calls · 1 active day                                 │
+ │ CodeBuddy █░░░░░░░ 403.75M 13%   OpenCode ████░░░░   1.60B 51%   Qoder CN ███░░░░░   1.12B 36%                     │
  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  ╭────────────────────────────────────────────────────────╮ ╭─────────────────────────────────────────────────────────╮
- │ top models · 2567.24M                                  │ │ top skills · 0 calls                                    │
- │  minimax-m3.1-flash-fr… ocut      1587.95M ██████ 62%  │ │   none in this window · d widens it                     │
- │  dfmodel                qcut      638.21M ██░░░░ 25%   │ │                                                         │
- │  deepseek-v4.1-flash    cbut      239.65M █░░░░░  9%   │ ╰─────────────────────────────────────────────────────────╯
- │  glm-5.3-flash          cbut       46.33M █░░░░░  2%   │
- │  deepseek-v4-1-flash    cbut       25.25M █░░░░░  1%   │
- │  qfmodel                qcut       17.81M █░░░░░  1%   │
- │  deepseek-v4.1-flash-f… ocut        7.08M █░░░░░  0%   │
- │  flint-40b-free         ocut        4.96M █░░░░░  0%   │
- │                                                        │
- │ by tracker · tokens / call                             │
- │  CodeBuddy    311.22M  1,030 calls  302K/call          │
- │  OpenCode     1599.99M  11,008 calls  145K/call        │
- │  Qoder CN     656.02M  4,260 calls  154K/call          │
+ │ top models · 3.13B                                     │ │ top skills · 1 calls                                    │
+ │  minimax-m3.1-flash-fr… ocut        1.59B ██████  51%  │ │  chinese-to-English-camp…      1 ██████ 100%  47m ago   │
+ │  deepseek-v4.1-flash    all         1.00B ████░░  32%  │ │                                                         │
+ │  qwen3.8-flash          qcut      484.65M ██░░░░  16%  │ ╰─────────────────────────────────────────────────────────╯
+ │  glm-5.3-flash          cbut       46.33M █░░░░░   1%  │
+ │  flint-40b-free         ocut        4.96M █░░░░░   0%  │
  │                                                        │
  ╰────────────────────────────────────────────────────────╯
- 3 of 3 indexes · 94.5 MB · synced 0s ago
+
+
+
+
+ 3 of 3 indexes · 97.3 MB · synced 0s ago
  tab Next tab  shift+tab Prev tab  q Quit  r Sync now  d Date  ? Help
 ```
 

@@ -825,34 +825,6 @@ class DashboardPane(Pane):
             line.append("\n")
             models.append_text(line)
 
-        # Tokens per call is the number the split hides: a tracker can use fewer
-        # tokens and still be the expensive one.
-        if self._kpis.per_source_calls:
-            rows = []
-            for source in SOURCES:
-                tokens = self._kpis.per_source.get(source.key)
-                if tokens is None:
-                    continue
-                calls = self._kpis.per_source_calls.get(source.key, 0)
-                per_call = f"{fmt_tokens(round(tokens / calls))}/call" if calls else "—"
-                rows.append((source, tokens, calls, per_call))
-            tok_w = max([len(fmt_tokens(r[1])) for r in rows] + [7])
-            call_w = max([len(f"{r[2]:,}") for r in rows] + [5])
-            per_w = max([len(r[3]) for r in rows] + [9])
-            full = 1 + 12 + 1 + tok_w + 2 + call_w + 6 + 2 + per_w
-            with_calls = models_w >= full
-            models.append("\nby tracker · tokens / call\n", style="bold")
-            for source, tokens, calls, per_call in rows:
-                line = Text()
-                line.append(f" {source.label:<12}", style=SOURCE_STYLE.get(source.key, ""))
-                line.append(f" {fmt_tokens(tokens):>{tok_w}}")
-                if with_calls:
-                    line.append(f"  {calls:>{call_w},} calls")
-                # The per-call figure is what this block is for, so the call
-                # count is what goes when the card is narrow; it is already in
-                # the KPI strip above.
-                line.append(f"  {per_call:>{per_w}}\n")
-                models.append_text(line)
         self.query_one("#top-models", Static).update(models)
 
         calls = sum(r.calls for r in self._skills)
