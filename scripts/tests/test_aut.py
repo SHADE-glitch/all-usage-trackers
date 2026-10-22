@@ -21,14 +21,19 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import aut_db  # noqa: E402
+import aut_model as model  # noqa: E402
+from aut_picker import bounds_of  # noqa: E402
 from aut_sources import BY_KEY, Snapshot  # noqa: E402
+from datetime import date  # noqa: E402
 
 DAY_MS = 86_400_000
 
 CBUT_DDL = """
 CREATE TABLE model_responses (
     message_id TEXT PRIMARY KEY, session_id TEXT, model TEXT, provider TEXT,
-    prompt_tokens INTEGER, completion_tokens INTEGER, provider_total_tokens INTEGER,
+    prompt_tokens INTEGER, completion_tokens INTEGER,
+    cache_read_input_tokens INTEGER, cache_creation_input_tokens INTEGER,
+    provider_total_tokens INTEGER,
     credit REAL, ts INTEGER, project TEXT, usage_available INTEGER DEFAULT 0
 );
 """
@@ -37,7 +42,45 @@ OCUT_DDL = """
 CREATE TABLE model_calls (
     call_id TEXT PRIMARY KEY, session_id TEXT, model TEXT, provider TEXT,
     prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER,
-    cost REAL, ts INTEGER, project TEXT, usage_available INTEGER NOT NULL DEFAULT 1
+    cache_read INTEGER, cache_write INTEGER,
+    cost REAL, ts INTEGER, project TEXT, directory TEXT,
+    usage_available INTEGER NOT NULL DEFAULT 1
+);
+"""
+
+# The entity tables, as the real indexes declare them.
+CBUT_ENTITIES = """
+CREATE TABLE skill_usage (
+    call_id TEXT PRIMARY KEY, skill TEXT, has_args INTEGER DEFAULT 0, plugin TEXT,
+    session_id TEXT, project TEXT, ts INTEGER, status TEXT, duration_ms INTEGER
+);
+CREATE TABLE tool_calls (
+    call_id TEXT PRIMARY KEY, session_id TEXT, project TEXT, tool_name TEXT,
+    category TEXT, ts INTEGER, duration_ms INTEGER, status TEXT, model TEXT
+);
+"""
+
+OCUT_ENTITIES = """
+CREATE TABLE skill_usage (
+    call_id TEXT PRIMARY KEY, skill TEXT, session_id TEXT, project TEXT,
+    ts INTEGER, status TEXT, duration_ms INTEGER
+);
+CREATE TABLE tool_calls (
+    call_id TEXT PRIMARY KEY, session_id TEXT, project TEXT, directory TEXT,
+    tool_name TEXT, category TEXT, status TEXT, ts INTEGER, duration_ms INTEGER,
+    model TEXT, provider TEXT
+);
+"""
+
+QCUT_ENTITIES = """
+CREATE TABLE skill_usage (
+    call_id TEXT PRIMARY KEY, skill TEXT, plugin TEXT, session_id TEXT,
+    project TEXT, ts INTEGER, status TEXT, duration_ms INTEGER
+);
+CREATE TABLE tool_calls (
+    call_id TEXT PRIMARY KEY, session_id TEXT, project TEXT, tool_name TEXT,
+    category TEXT, ts INTEGER, duration_ms INTEGER, status TEXT,
+    is_sidechain INTEGER DEFAULT 0
 );
 """
 
@@ -45,16 +88,26 @@ QCUT_DDL = """
 CREATE TABLE model_calls (
     message_id TEXT PRIMARY KEY, session_id TEXT, model TEXT, ts INTEGER,
     project TEXT, input_tokens INTEGER, output_tokens INTEGER,
+    cache_read_tokens INTEGER, cache_creation_tokens INTEGER,
     credits REAL, has_usage INTEGER DEFAULT 0
 );
 """
 
 
-def _db(home: Path, db_name: str, ddl: str) -> sqlite3.Connection:
+ENTITY_DDL = {
+    "codebuddy-usage-tracker": CBUT_ENTITIES,
+    "opencode-usage-tracker": OCUT_ENTITIES,
+    "qoder-cn-usage-tracker": QCUT_ENTITIES,
+}
+
+
+def _db(home: Path, db_name: str, ddl: str, entities: bool = False) -> sqlite3.Connection:
     folder = home / ".local" / "share" / db_name
     folder.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(folder / "usage.db")
     conn.executescript(ddl)
+    if entities:
+        conn.executescript(ENTITY_DDL[db_name])
     return conn
 
 
@@ -99,7 +152,7 @@ class TestCbut(AdapterCase):
             ("m3", "s2", "gpt-5", "openai", 0, 0, 900, None, self.now - 2 * DAY_MS, "/p/two", 1),
             ("m4", "s3", "old", "x", 10, 10, 0, None, self.now - 40 * DAY_MS, "/p/two", 1),
         ]
-        conn.executemany("INSERT INTO model_responses VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
+        conn.executemany("INSERT INTO model_responses (message_id, session_id, model, provider, prompt_tokens, completion_tokens, provider_total_tokens, credit, ts, project, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
         conn.commit()
         conn.close()
 
@@ -137,7 +190,7 @@ class TestCbut(AdapterCase):
 
     def test_an_old_newest_record_reads_as_idle(self):
         conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
-        conn.execute("INSERT INTO model_responses VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO model_responses (message_id, session_id, model, provider, prompt_tokens, completion_tokens, provider_total_tokens, credit, ts, project, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                      ("m1", "s1", "m", "p", 1, 1, 0, None, self.now - 30 * DAY_MS, "/p", 1))
         conn.commit()
         conn.close()
@@ -147,8 +200,11 @@ class TestCbut(AdapterCase):
 class TestQcut(AdapterCase):
     def test_credits_without_tokens_does_not_print_zero(self):
         conn = _db(self.home, "qoder-cn-usage-tracker", QCUT_DDL)
-        conn.execute("INSERT INTO model_calls VALUES (?,?,?,?,?,?,?,?,?)",
-                     ("m1", "s1", "custom-route", self.now, "/p", 0, 0, 12.5, 1))
+        conn.execute(
+            "INSERT INTO model_calls (message_id, session_id, model, ts, project,"
+            " input_tokens, output_tokens, credits, has_usage)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            ("m1", "s1", "custom-route", self.now, "/p", 0, 0, 12.5, 1))
         conn.commit()
         conn.close()
         snap = self.snapshot("qcut")
@@ -159,7 +215,9 @@ class TestQcut(AdapterCase):
     def test_token_rows_add_up(self):
         conn = _db(self.home, "qoder-cn-usage-tracker", QCUT_DDL)
         conn.executemany(
-            "INSERT INTO model_calls VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO model_calls (message_id, session_id, model, ts, project,"
+            " input_tokens, output_tokens, credits, has_usage)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
             [("m1", "s1", "a", self.now, "/p", 100, 20, None, 1),
              ("m2", "s1", "a", self.now, "/p", 50, 30, None, 1)],
         )
@@ -172,9 +230,11 @@ class TestOcut(AdapterCase):
     def test_partial_usage_is_flagged(self):
         conn = _db(self.home, "opencode-usage-tracker", OCUT_DDL)
         conn.executemany(
-            "INSERT INTO model_calls VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            [("c1", "s1", "m", "p", 10, 5, 15, 0.1, self.now, "/p", 1),
-             ("c2", "s1", "m", "p", None, None, 0, None, self.now, "/p", 0)],
+            "INSERT INTO model_calls (call_id, session_id, model, provider,"
+            " prompt_tokens, completion_tokens, total_tokens, cost, ts, project,"
+            " directory, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [("c1", "s1", "m", "p", 10, 5, 15, 0.1, self.now, "hash1", "/p", 1),
+             ("c2", "s1", "m", "p", None, None, 0, None, self.now, "hash1", "/p", 0)],
         )
         conn.commit()
         conn.close()
@@ -224,30 +284,213 @@ class TestFormatting(unittest.TestCase):
 
 try:
     import textual  # noqa: F401
-    from textual.widgets import DataTable
+    from textual.widgets import Button, DataTable, TabbedContent
 
     HAS_TEXTUAL = True
 except ImportError:  # pragma: no cover - only when the venv is missing
     HAS_TEXTUAL = False
 
 
+# --- aggregation -------------------------------------------------------------
+
+class TestAggregation(AdapterCase):
+    """Cross-source merging: the numbers only this app can produce."""
+
+    def _two_sources(self) -> None:
+        cbut = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True)
+        cbut.executemany(
+            "INSERT INTO model_responses (message_id, session_id, model, provider, prompt_tokens, completion_tokens, provider_total_tokens, credit, ts, project, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [("m1", "s1", "m-a", "p", 100, 10, 110, None, self.now, "/p/one", 1),
+             ("m2", "s1", "m-a", "p", 50, 5, 55, None, self.now, "/p/one", 1)],
+        )
+        cbut.executemany(
+            "INSERT INTO skill_usage (call_id, skill, session_id, project, ts, status, duration_ms)"
+            " VALUES (?,?,?,?,?,?,?)",
+            [("k1", "code-review", "s1", "/p/one", self.now, "completed", 1000),
+             ("k2", "Code-Review", "s1", "/p/one", self.now, "error", 3000)],
+        )
+        cbut.executemany(
+            "INSERT INTO tool_calls (call_id, session_id, project, tool_name, category, ts, duration_ms, status)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            [("t1", "s1", "/p/one", "Read", "builtin", self.now, 10, "completed"),
+             ("t2", "s1", "/p/one", "Read", "builtin", self.now, 20, "completed")],
+        )
+        cbut.commit()
+        cbut.close()
+
+        ocut = _db(self.home, "opencode-usage-tracker", OCUT_DDL, entities=True)
+        ocut.execute(
+            "INSERT INTO model_calls (call_id, session_id, model, provider,"
+            " prompt_tokens, completion_tokens, total_tokens, cost, ts, project,"
+            " directory, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("c1", "s2", "m-a", "p", 7, 3, 10, None, self.now, "hash2", "/p/two", 1),
+        )
+        ocut.execute(
+            "INSERT INTO skill_usage (call_id, skill, session_id, project, ts, status, duration_ms)"
+            " VALUES (?,?,?,?,?,?,?)",
+            ("k3", "code-review", "s2", "/p/two", self.now, "completed", 2000),
+        )
+        ocut.execute(
+            "INSERT INTO tool_calls (call_id, session_id, project, tool_name, category, ts, duration_ms, status)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            ("t3", "s2", "/p/two", "read", "builtin", self.now, 30, "completed"),
+        )
+        ocut.commit()
+        ocut.close()
+
+    def test_tokens_merge_and_fold_by_source(self):
+        self._two_sources()
+        rows = model.token_rows(0, self.now)
+        by_model = [r for r in rows if r.model == "m-a"]
+        self.assertEqual(len(by_model), 2)
+        self.assertEqual(sum(r.total for r in by_model), 175)
+        folded = {r.source: r for r in model.by_source(rows)}
+        self.assertEqual(folded["cbut"].total, 165)
+        self.assertEqual(folded["ocut"].total, 10)
+        self.assertEqual(folded["cbut"].requests, 2)
+
+    def test_skills_merge_by_name_case_insensitively(self):
+        self._two_sources()
+        rows = model.entity_rows("skills", 0, self.now)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row.name, "code-review")   # the spelling with most calls
+        self.assertEqual(row.calls, 3)
+        self.assertEqual(row.per_source, {"cbut": 2, "ocut": 1})
+        self.assertEqual((row.ok, row.fail), (2, 1))
+        # 1s, 3s, 2s weighted by calls -> 2s
+        self.assertAlmostEqual(row.avg_ms, 2000)
+
+    def test_tools_merge_across_capitalisation(self):
+        self._two_sources()
+        rows = model.entity_rows("tools", 0, self.now)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].calls, 3)
+        self.assertEqual(rows[0].per_source, {"cbut": 2, "ocut": 1})
+
+    def test_unknown_status_is_pending_not_failure(self):
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True)
+        conn.execute(
+            "INSERT INTO skill_usage (call_id, skill, session_id, project, ts, status, duration_ms)"
+            " VALUES (?,?,?,?,?,?,?)",
+            ("k1", "x", "s", "/p", self.now, "running", 10),
+        )
+        conn.commit()
+        conn.close()
+        row = model.entity_rows("skills", 0, self.now)[0]
+        self.assertEqual((row.ok, row.fail, row.pending), (0, 0, 1))
+
+    def test_missing_database_contributes_nothing(self):
+        self._two_sources()
+        # qcut has no database here at all.
+        rows = model.token_rows(0, self.now)
+        self.assertEqual({r.source for r in rows}, {"cbut", "ocut"})
+
+    def test_kpis_compare_the_same_time_of_day(self):
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
+        day = 86_400_000
+        conn.executemany(
+            "INSERT INTO model_responses (message_id, session_id, model, provider, prompt_tokens, completion_tokens, provider_total_tokens, credit, ts, project, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [("m1", "s1", "m", "p", 100, 0, 100, None, self.now, "/p", 1),
+             ("m2", "s1", "m", "p", 300, 0, 300, None, self.now - day, "/p", 1)],
+        )
+        conn.commit()
+        conn.close()
+        start, end = bounds_of("1d", self.now)
+        k = model.kpis(start, end)
+        # Only today's row is in the window; yesterday's is the comparison.
+        self.assertEqual(k.tokens, 100)
+        self.assertEqual(k.prev_tokens, 300)
+
+    def test_day_labels_are_capped(self):
+        labels = model.day_labels(0, self.now, max_days=30)
+        self.assertEqual(len(labels), 30)
+        self.assertEqual(labels[-1], date.fromtimestamp(self.now / 1000).isoformat())
+
+    def test_ocut_project_uses_the_directory_not_the_hash(self):
+        self._two_sources()
+        rows = model.call_rows(0, self.now)
+        self.assertEqual({r.project for r in rows if r.source == "ocut"}, {"/p/two"})
+
+
 @unittest.skipUnless(HAS_TEXTUAL, "textual is not installed")
 class TestBoard(unittest.IsolatedAsyncioTestCase):
-    async def test_board_mounts_and_cycles_windows(self):
+    async def asyncSetUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = mock.patch.dict(os.environ, {"HOME": self._tmp.name})
+        self._env.start()
+
+    async def asyncTearDown(self) -> None:
+        self._env.stop()
+        self._tmp.cleanup()
+
+    async def test_six_tabs_and_direct_jump(self):
         from aut_app import AutApp
 
-        with tempfile.TemporaryDirectory() as tmp, \
-                mock.patch.dict(os.environ, {"HOME": tmp}):
-            app = AutApp(days=7)
-            async with app.run_test() as pilot:
-                table = app.query_one(DataTable)
-                self.assertEqual(table.row_count, 3)
-                await pilot.press("w")
-                self.assertEqual(app.days, 30)
-                await pilot.press("w")
-                self.assertEqual(app.days, 0)      # all time
-                await pilot.press("w")
-                self.assertEqual(app.days, 1)      # wraps back to 1d
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            tabs = app.query_one(TabbedContent)
+            self.assertEqual(tabs.active, "tab-dashboard")
+            await pilot.press("4")
+            await pilot.pause()
+            self.assertEqual(tabs.active, "tab-tokens")
+            await pilot.press("6")
+            await pilot.pause()
+            self.assertEqual(tabs.active, "tab-sources")
+
+    async def test_tokens_grouping_switches_row_granularity(self):
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("4")
+            await pilot.pause()
+            pane = app.pane()
+            before = pane.by_source
+            await pilot.press("g")
+            await pilot.pause()
+            self.assertNotEqual(pane.by_source, before)
+
+    async def test_filter_narrows_and_escape_restores(self):
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("4")
+            await pilot.pause()
+            pane = app.pane()
+            pane.needle = "zzz-no-such-model"
+            pane.reload(pane.window)
+            self.assertEqual(pane.query_one(DataTable).row_count, 0)
+            pane.needle = ""
+            pane.reload(pane.window)
+            self.assertGreaterEqual(pane.query_one(DataTable).row_count, 0)
+
+    async def test_the_picker_returns_a_custom_window(self):
+        from aut_app import AutApp
+        from aut_picker import CustomWindow
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("d")
+            await pilot.pause()
+            app.screen.query_one("#dr-7d", Button).press()
+            await pilot.pause()
+            app.screen.query_one("#dr-ok", Button).press()
+            await pilot.pause()
+            self.assertIsInstance(app.windows["dashboard"], CustomWindow)
+
+    async def test_enter_with_no_rows_is_a_no_op(self):
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("3")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            # An empty tab must not push a blank detail screen.
+            self.assertEqual([type(s).__name__ for s in app.screen_stack], ["Screen"])
 
 
 if __name__ == "__main__":

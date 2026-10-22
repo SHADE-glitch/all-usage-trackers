@@ -56,6 +56,17 @@ class Source:
     cost_expr: str
     real_col: str
     cost_unit: str
+    # The same call table, named by the columns the tab-level aggregations need.
+    # Keeping the six expressions here means a schema change is one edit in one
+    # file, and `aut_model` never learns a column name.
+    expr_input: str
+    expr_output: str
+    expr_cache_read: str
+    expr_cache_write: str
+    expr_total: str
+    # OpenCode stores a hashed project id and the directory beside it, so the
+    # path has to be named explicitly; the other two put the path in 'project'.
+    expr_project: str
 
     @property
     def db_path(self) -> Path:
@@ -157,10 +168,11 @@ class Source:
         )
 
     def _top(self, conn: sqlite3.Connection, column: str, since: int) -> list[tuple[str, int]]:
+        expr = self.expr_project if column == "project" else column
         rows = conn.execute(
-            f"SELECT {column}, SUM({self.token_expr}) AS t FROM {self.table}"
-            f" WHERE ts >= ? AND {column} IS NOT NULL AND {column} != ''"
-            f" GROUP BY {column} ORDER BY t DESC LIMIT 3",
+            f"SELECT {expr}, SUM({self.token_expr}) AS t FROM {self.table}"
+            f" WHERE ts >= ? AND {expr} IS NOT NULL AND {expr} != ''"
+            f" GROUP BY {expr} ORDER BY t DESC LIMIT 3",
             (since,),
         ).fetchall()
         return [(str(row[0]), int(row[1] or 0)) for row in rows]
@@ -180,6 +192,15 @@ SOURCES: tuple[Source, ...] = (
         cost_expr="credit",
         real_col="usage_available",
         cost_unit="cr",
+        expr_input="COALESCE(prompt_tokens, 0)",
+        expr_output="COALESCE(completion_tokens, 0)",
+        expr_cache_read="COALESCE(cache_read_input_tokens, 0)",
+        expr_cache_write="COALESCE(cache_creation_input_tokens, 0)",
+        expr_total=(
+            "COALESCE(NULLIF(provider_total_tokens, 0),"
+            " COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))"
+        ),
+        expr_project="COALESCE(project, '')",
     ),
     Source(
         key="ocut",
@@ -194,6 +215,15 @@ SOURCES: tuple[Source, ...] = (
         cost_expr="cost",
         real_col="usage_available",
         cost_unit="$",
+        expr_input="COALESCE(prompt_tokens, 0)",
+        expr_output="COALESCE(completion_tokens, 0)",
+        expr_cache_read="COALESCE(cache_read, 0)",
+        expr_cache_write="COALESCE(cache_write, 0)",
+        expr_total=(
+            "COALESCE(NULLIF(total_tokens, 0),"
+            " COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))"
+        ),
+        expr_project="COALESCE(NULLIF(directory, ''), project, '')",
     ),
     Source(
         key="qcut",
@@ -205,6 +235,14 @@ SOURCES: tuple[Source, ...] = (
         cost_expr="credits",
         real_col="has_usage",
         cost_unit="cr",
+        expr_input="COALESCE(input_tokens, 0)",
+        expr_output="COALESCE(output_tokens, 0)",
+        expr_cache_read="COALESCE(cache_read_tokens, 0)",
+        expr_cache_write="COALESCE(cache_creation_tokens, 0)",
+        expr_total="COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)",
+        # qcut's model_calls carries the path in 'project' only; 'cwd' lives on
+        # its sessions table, not here.
+        expr_project="COALESCE(project, '')",
     ),
 )
 
