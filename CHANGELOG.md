@@ -55,9 +55,12 @@ One token number everywhere, and a dashboard that fits its content.
 ### Layout
 
 - The dashboard's bottom half is two cards — top models and top skills — that
-  grow with their rows (`height: auto`) inside a pane that scrolls
-  (`overflow-y: auto`) once the screen is full. A list that outgrew its fixed
-  row count used to be silently truncated; now nothing is cut.
+  grow with their rows and fill the pane: each card's `min-height` is the
+  height the pane has left after the state line and the KPI card, so a short
+  window ends at the status line instead of a dozen rows above it. It is a
+  floor, not a fixed height — a list taller than the pane still grows to its
+  own height and the pane scrolls (`overflow-y: auto`), so nothing is clipped
+  either way.
 - **A top-model row names its origin.** A model's total is a sum over the
   trackers that used it, and on a merged board that is exactly what the number
   cannot tell you, so each row carries a tag beside the name (`cbut`, `ocut`,

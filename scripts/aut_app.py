@@ -666,6 +666,7 @@ class DashboardPane(Pane):
         self._kpis = model.kpis(None, model.now_ms())
         self._models: list[model.ModelTotal] = []
         self._skills: list = []
+        self._tops_rows = 0
         self._recent: list = []
 
     def compose(self) -> ComposeResult:
@@ -716,6 +717,31 @@ class DashboardPane(Pane):
         self.query_one("#note", Static).update(self._note_text())
         self.query_one("#kpi", Static).update(self._kpi_text(inner))
         self._paint_tops(width)
+        self._fit_cards()
+
+    def _fit_cards(self) -> None:
+        """Give the two list cards the height the pane has left.
+
+        Both cards are content-sized, so a dashboard with five models ended a
+        dozen rows above the status line. The spare height goes to the cards:
+        their border grows to the bottom of the pane instead of leaving it
+        empty. It is a *minimum*, so a list taller than the pane still grows to
+        its own height and the pane scrolls exactly as before — nothing is
+        clipped.
+        """
+        natural = self._tops_rows
+        if not natural:
+            return
+        note = self.query_one("#note", Static)
+        kpi = self.query_one("#kpi", Static)
+        try:
+            kpi_h = int(kpi.styles.height.value or 5)
+        except Exception:  # not a plain scalar: fall back to the CSS value
+            kpi_h = 5
+        spare = (self.size.height - max(1, note.size.height) - kpi_h - natural)
+        height = natural + max(0, spare)
+        for wid in ("#top-models", "#top-skills"):
+            self.query_one(wid, Static).styles.min_height = height
 
     def _kpi_text(self, width: int = 120) -> Text:
         k = self._kpis
@@ -852,6 +878,12 @@ class DashboardPane(Pane):
             line.append("\n")
             side.append_text(line)
         self.query_one("#top-skills", Static).update(side)
+
+        # The natural height of the row, for _fit_cards: the taller of the two
+        # cards, counted the way the widget counts it — a trailing newline is a
+        # line — plus the two rows of border.
+        self._tops_rows = max(len(models.plain.split("\n")),
+                              len(side.plain.split("\n"))) + 2
 
     @staticmethod
     def _model_style(item: model.ModelTotal) -> str:

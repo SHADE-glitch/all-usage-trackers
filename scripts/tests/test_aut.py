@@ -703,6 +703,47 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(height.unit, Unit.AUTO)
             self.assertEqual(str(app.pane().styles.overflow_y), "auto")
 
+    async def test_the_cards_take_the_height_the_pane_has_left(self):
+        """Two content-sized cards left the pane empty under a short list.
+
+        The cards are a *minimum* height, not a fixed one: a list taller than
+        the pane still grows to its own height and the pane scrolls, so the
+        fill can never clip a row.
+        """
+        from textual.widgets import Static
+
+        from aut_app import AutApp, DashboardPane
+
+        app = AutApp()
+        async with app.run_test(size=(120, 45)) as pilot:
+            pane = app.pane()
+            self.assertIsInstance(pane, DashboardPane)
+            pane._models = [model.ModelTotal(f"m{i}", total=100 - i, requests=1,
+                                             per_source={"cbut": 100 - i})
+                            for i in range(3)]
+            pane._skills = []
+            pane._paint()
+            await pilot.pause()
+            models = app.query_one("#top-models", Static)
+            self.assertEqual(pane.max_scroll_y, 0, "a tall pane still scrolls")
+            self.assertEqual(models.region.bottom, pane.region.bottom,
+                             "the cards stopped short of the pane's bottom")
+
+        app = AutApp()
+        async with app.run_test(size=(120, 20)) as pilot:
+            pane = app.pane()
+            pane._models = [model.ModelTotal(f"m{i}", total=1000 - i, requests=1,
+                                             per_source={"cbut": 1000 - i})
+                            for i in range(30)]
+            pane._skills = []
+            pane._paint()
+            await pilot.pause()
+            models = app.query_one("#top-models", Static)
+            self.assertGreater(pane.max_scroll_y, 0,
+                               "a list taller than the pane must scroll")
+            self.assertIn("m29", str(models.content),
+                          "the fill clipped the last row instead of scrolling")
+
     async def test_the_caption_above_the_table_names_sort_and_grouping(self):
         from textual.widgets import Static
 
