@@ -493,6 +493,27 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pane.mode, "source")
             self.assertNotIn("provider", pane._visible)
 
+    async def test_the_caption_above_the_table_names_sort_and_grouping(self):
+        from textual.widgets import Static
+
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("4")
+            await pilot.pause()
+            pane = app.pane()
+            note = pane.query_one("#note", Static)
+            table = pane.query_one(DataTable)
+            self.assertLess(note.region.y, table.region.y)
+            caption = str(note.render())
+            self.assertIn("sort: total", caption)
+            self.assertIn("grouping: by model", caption)
+
+            await pilot.press("g")
+            await pilot.pause()
+            self.assertIn("by model × tracker", str(note.render()))
+
     async def test_the_sorted_column_is_marked_in_its_header(self):
         from aut_app import AutApp
 

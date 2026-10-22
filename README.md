@@ -33,26 +33,26 @@
 ```text
  aut · all usage trackers                                       📅 Custom…   Today ▾
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 135.74M tokens   ↑305% vs 33.51M   ·   122 sessions · 5,329 calls · 1 active day
- CodeBuddy 42.28M 31%   OpenCode 12.29M  9%   Qoder CN 81.17M 60%
+ 5 models · 0 skills in this window · up/down picks a model · enter opens Tokens for dfmodel
+ 144.19M tokens   ↑330% vs 33.51M   ·   122 sessions · 5,377 calls · 1 active day
+ CodeBuddy 50.73M 35%   OpenCode 12.29M  9%   Qoder CN 81.17M 56%
 
  tokens per hour  ·  Today  ·  peak 50.46M at 11
  50.5M ┤           █
-       │           █
        │           █ █
- 25.2M ┤           █ █
+ 25.2M ┤           ███
        │          ████
-       │          ████
-     0 ┤█         ████
-       └──────────────
-         01 04 07 10 13
-  top models · 135.74M                             top skills · 0 calls
-   dfmodel                     81.17M ██████ 60%     none in this window · d widens it
-   deepseek-v4.1-flash         42.24M ███░░░ 31%
-   minimax-m3.1-flash-free     11.99M █░░░░░  9%   recent calls
-   deepseek-v4.1-flash-free      301K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
-   glm-5.3-flash                  38K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
-                                                      2m ago  CodeBuddy  deepseek-v4.1-flash  148K
+     0 ┤█         █████
+       └───────────────
+          02 05 08 11 14
+  top models · 144.19M                             top skills · 0 calls
+   dfmodel                     81.17M ██████ 56%     none in this window · d widens it
+   deepseek-v4.1-flash         50.70M ████░░ 35%
+   minimax-m3.1-flash-free     11.99M █░░░░░  8%   recent calls
+   deepseek-v4.1-flash-free      301K █░░░░░  0%      4m ago  CodeBuddy  deepseek-v4.1-flash  198K
+   glm-5.3-flash                  38K █░░░░░  0%      4m ago  CodeBuddy  deepseek-v4.1-flash  195K
+ 3 of 3 indexes · 87.2 MB · synced 0s ago
+ tab Next tab  shift+tab Prev tab  q Quit  r Sync now  s Sort  / Filter  d Date  g Group  ? Help
 ```
 
 ## Keys
@@ -63,7 +63,7 @@ The shared keys are the tracker family's, so a habit learned in `cbut` works her
 | :--- | :--- |
 | `tab` / `shift+tab` | next / previous tab |
 | `1`–`6` | jump to a tab directly |
-| `s` | cycle the sort order — the sorted column is marked `▼` in its header |
+| `s` | cycle the sort order — the caption above the table names it (`sort: total ▼ (s)`) |
 | `/` | filter rows ( `esc` clears) |
 | `d` | date range — presets or the custom calendar picker |
 | `enter` | open the selected row's detail; on the Dashboard, open Tokens for the picked model |
@@ -73,6 +73,8 @@ The shared keys are the tracker family's, so a habit learned in `cbut` works her
 | `?` `q` | help / quit |
 
 Every tab remembers its own window, as the trackers do: Dashboard, Tokens and Usage open on today, Tools on the week, Skills on the month (skills are rare enough that a week is often one call each).
+
+The screen is laid out like the three trackers: the state line (rows, sort, grouping, totals) sits **above** the table, the bottom line is provenance — how many indexes were read, how big they are, when they were last synced — and the footer lists the keys.
 
 ## Reading the numbers
 

@@ -57,6 +57,10 @@ This repository is public.
 - **Keep the keys aligned with the family.** `r` syncs, `s` sorts, `/` filters,
   `d` opens the range picker, `tab` cycles. A different meaning for a shared key
   is a bug, not a preference.
+- **State above the table, provenance below, keys in the footer.** The caption
+  names the sort and the grouping (`sort: total ▼ (s)`); the line under the table
+  says how many indexes were read, how big they are and when they were synced.
+  This is the three trackers' layout, and the reason `s` is discoverable at all.
 
 ## Commands
 

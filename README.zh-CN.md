@@ -33,26 +33,26 @@
 ```text
  aut · all usage trackers                                       📅 Custom…   Today ▾
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 135.74M tokens   ↑305% vs 33.51M   ·   122 sessions · 5,329 calls · 1 active day
- CodeBuddy 42.28M 31%   OpenCode 12.29M  9%   Qoder CN 81.17M 60%
+ 5 models · 0 skills in this window · up/down picks a model · enter opens Tokens for dfmodel
+ 144.19M tokens   ↑330% vs 33.51M   ·   122 sessions · 5,377 calls · 1 active day
+ CodeBuddy 50.73M 35%   OpenCode 12.29M  9%   Qoder CN 81.17M 56%
 
  tokens per hour  ·  Today  ·  peak 50.46M at 11
  50.5M ┤           █
-       │           █
        │           █ █
- 25.2M ┤           █ █
+ 25.2M ┤           ███
        │          ████
-       │          ████
-     0 ┤█         ████
-       └──────────────
-         01 04 07 10 13
-  top models · 135.74M                             top skills · 0 calls
-   dfmodel                     81.17M ██████ 60%     none in this window · d widens it
-   deepseek-v4.1-flash         42.24M ███░░░ 31%
-   minimax-m3.1-flash-free     11.99M █░░░░░  9%   recent calls
-   deepseek-v4.1-flash-free      301K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
-   glm-5.3-flash                  38K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
-                                                      2m ago  CodeBuddy  deepseek-v4.1-flash  148K
+     0 ┤█         █████
+       └───────────────
+          02 05 08 11 14
+  top models · 144.19M                             top skills · 0 calls
+   dfmodel                     81.17M ██████ 56%     none in this window · d widens it
+   deepseek-v4.1-flash         50.70M ████░░ 35%
+   minimax-m3.1-flash-free     11.99M █░░░░░  8%   recent calls
+   deepseek-v4.1-flash-free      301K █░░░░░  0%      4m ago  CodeBuddy  deepseek-v4.1-flash  198K
+   glm-5.3-flash                  38K █░░░░░  0%      4m ago  CodeBuddy  deepseek-v4.1-flash  195K
+ 3 of 3 indexes · 87.2 MB · synced 0s ago
+ tab Next tab  shift+tab Prev tab  q Quit  r Sync now  s Sort  / Filter  d Date  g Group  ? Help
 ```
 
 ## 按键
@@ -63,7 +63,7 @@
 | :--- | :--- |
 | `tab` / `shift+tab` | 下一个 / 上一个 tab |
 | `1`–`6` | 直接跳到某个 tab |
-| `s` | 循环排序 —— 当前排序列的表头带 `▼` |
+| `s` | 循环排序 —— 表格上方的状态行会写明（`sort: total ▼ (s)`） |
 | `/` | 过滤行（`esc` 清除） |
 | `d` | 时间范围 —— 预设或完整日历选择器 |
 | `enter` | 打开选中行的详情；在 Dashboard 上则打开选中模型的 Tokens |
@@ -73,6 +73,8 @@
 | `?` `q` | 帮助 / 退出 |
 
 每个 tab 各记各的时间窗，和三家的行为一致：Dashboard / Tokens / Usage 默认今天，Tools 默认一周，Skills 默认一个月（skill 很少，一周往往只有一两次调用）。
+
+屏幕布局也照三家：**状态行在表格上方**（行数、排序、分组、合计），底部一行是数据来源（读了几份索引、多大、多久前同步），最下面一行是按键提示。
 
 ## 怎么读这些数字
 

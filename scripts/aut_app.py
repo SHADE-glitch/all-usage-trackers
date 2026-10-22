@@ -25,7 +25,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, DataTable, Input, Select, Static, TabbedContent, TabPane
+from textual.widgets import (Button, DataTable, Footer, Input, Select, Static,
+                             TabbedContent, TabPane)
 
 import aut_model as model
 from aut_chart import pct, share_bar, stacked_chart
@@ -52,24 +53,21 @@ TAB_ORDER = ("dashboard", "tools", "skills", "tokens", "usage", "sources")
 SOURCE_STYLE = {"cbut": "cyan", "ocut": "yellow", "qcut": "magenta"}
 
 HELP = """
-  tab / shift+tab   next / previous tab         1 - 6   jump to a tab
-  s                 cycle the sort order        /       filter rows
-  d                 date range                  esc     clear the filter
-  enter             open the selected row's detail
-  g                 Tokens: by model / model×tracker / tracker
-  r                 sync the three trackers now (runs their own sync)
-  ?                 this help                  q       quit
+  tab / shift+tab  next / previous tab    1 - 6  jump to a tab
+  s                cycle the sort order   /      filter rows
+  d                date range             esc    clear the filter
+  g                Tokens: by model / model × tracker / tracker
+  enter            open the selected row's detail
+  r                sync the three trackers now (runs their own sync)
+  ?                this help               q      quit
 
-  The sorted column carries a ▼ in its header and is named in the status line,
-  so s never has to be pressed to find out what it did.
+  The caption above each table names the sort (s) and, on Tokens, the
+  grouping (g) — so neither has to be pressed to find out what it did.
   Dashboard: up/down picks a model; enter opens Tokens filtered by it.
   Sources: enter opens that tracker's own TUI; q there returns to aut.
   There is no 'a' key: the trackers use it for "installed but never used",
   which has no cross-tool equivalent here.
 """
-
-HINT = "tab switch · s sort ▼ · / filter · d date · enter detail · g group · r sync · ? help · q quit"
-
 
 def _project(path: str, width: int = 36) -> Text:
     """A project path as one table cell.
@@ -174,9 +172,6 @@ class Pane(Vertical):
     def group_toggle(self) -> None:
         pass
 
-    def status(self) -> str:
-        return ""
-
 
 class TablePane(Pane):
     """A table, a filter, a sort order — the shape five of the six tabs share."""
@@ -191,6 +186,9 @@ class TablePane(Pane):
 
     DEFAULT_CSS = """
     TablePane { height: 1fr; }
+    /* The state line sits above the table, as it does in the three trackers:
+       "N rows · sort: total" is a caption for what follows, not a footnote. */
+    TablePane #note { height: auto; padding: 0 1; color: $text-muted; }
     /* A one-row Input keeps its border and draws it as ▔/▁ over the text, so
        the border is removed rather than the row made taller: the filter is a
        strip above the table, not a form field. */
@@ -198,7 +196,6 @@ class TablePane(Pane):
                         background: $boost; }
     TablePane #filter.-on { display: block; }
     TablePane #filter:focus { background: $accent 20%; }
-    TablePane #note { height: 1; padding: 0 1; color: $text-muted; }
     TablePane DataTable { height: 1fr; }
     """
 
@@ -211,9 +208,9 @@ class TablePane(Pane):
         self._visible: tuple[str, ...] = ()
 
     def compose(self) -> ComposeResult:
+        yield Static("", id="note")
         yield Input(placeholder="filter…", id="filter")
         yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
-        yield Static("", id="note")
 
     def on_mount(self) -> None:
         self._paint_columns(self.app.size.width)
@@ -259,8 +256,35 @@ class TablePane(Pane):
         values = self.cells(row).values()
         return needle in " ".join(str(v) for v in values).lower()
 
-    def note(self, window, rows: list) -> str:
+    def extra_note(self) -> str:
+        """What this tab adds after "N rows · sort: …"."""
         return ""
+
+    def note_text(self) -> Text:
+        """The caption above the table.
+
+        It names the sort on purpose: a silent reorder is indistinguishable from
+        the data having changed, and `s` cycling three fields is invisible
+        unless the line says which one is in force.
+        """
+        out = Text(f"{len(self._rows):,} rows")
+        if self.needle:
+            out.append(f" · filter {self.needle!r}")
+        column = self.sort_column()
+        out.append(f" · sort: {column} ▼ (s)" if column else " · sort: none")
+        extra = self.extra_note()
+        if extra:
+            out.append(f" · {extra}")
+        # The full set is whatever an unlimited terminal would show, which is not
+        # COLUMNS for a pane whose columns depend on its mode.
+        full = self.columns_for(10_000)
+        hidden = [name for name in full if name not in self._visible]
+        if hidden and self._visible:
+            # Only when columns were dropped: a note that always says "nothing
+            # hidden" costs a row to say nothing.
+            out.append(f"\n{len(self._visible)} of {len(full)} columns · "
+                       f"hidden: {', '.join(hidden)} · widen to see them")
+        return out
 
     def sort_key(self):
         if not self.SORT_FIELDS:
@@ -293,7 +317,7 @@ class TablePane(Pane):
             table.add_row(*[cells.get(name, "") for name in self._visible])
         if rows:
             table.move_cursor(row=min(cursor, len(rows) - 1))
-        self.query_one("#note", Static).update(self.note(window, rows))
+        self.query_one("#note", Static).update(self.note_text())
 
     def action_sort(self) -> None:
         if not self.SORT_FIELDS:
@@ -334,13 +358,6 @@ class TablePane(Pane):
         index = table.cursor_row
         return self._rows[index] if 0 <= index < len(self._rows) else None
 
-    def status(self) -> str:
-        bits = [f"{len(self._rows)} rows"]
-        if self.sort_column():
-            bits.append(f"sort by {self.sort_column()} ▼")
-        if self.needle:
-            bits.append(f"filter {self.needle!r}")
-        return " · ".join(bits)
 
 
 class TokensPane(TablePane):
@@ -356,7 +373,7 @@ class TokensPane(TablePane):
 
     MODES = ("model", "calls", "source")
     MODE_LABELS = {
-        "model": "by model · merged across trackers",
+        "model": "by model, all trackers merged",
         "calls": "by model × tracker",
         "source": "by tracker",
     }
@@ -437,12 +454,10 @@ class TokensPane(TablePane):
         self._paint_columns(self.app.size.width, force=True)
         self.reload(self.window)
 
-    def note(self, window, rows) -> str:
-        total = sum(r.total for r in rows)
-        tail = (" · g changes the grouping" if self.mode != "source"
-                else " · g changes the grouping")
-        return (f"{len(rows)} rows {self.MODE_LABELS[self.mode]} · "
-                f"total {fmt_tokens(total)}{tail}")
+    def extra_note(self) -> str:
+        total = sum(r.total for r in self._rows)
+        return (f"grouping: {self.MODE_LABELS[self.mode]} (g) · "
+                f"total {fmt_tokens(total)}")
 
     def open_selected(self) -> None:
         row = self.selected()
@@ -505,10 +520,10 @@ class EntityPane(TablePane):
             "last used": fmt_age(row.last_used),
         }
 
-    def note(self, window, rows) -> str:
-        shared = sum(1 for r in rows if len([v for v in r.per_source.values() if v]) > 1)
-        return (f"{len(rows)} {self.kind} · {shared} used by more than one tracker"
-                " · bar = share of calls in this window")
+    def extra_note(self) -> str:
+        shared = sum(1 for r in self._rows
+                     if len([v for v in r.per_source.values() if v]) > 1)
+        return f"{shared} used by more than one tracker"
 
     def open_selected(self) -> None:
         row = self.selected()
@@ -552,16 +567,13 @@ class UsagePane(TablePane):
             "session": row.session[:8] or Text("—", style="dim"),
         }
 
-    def note(self, window, rows) -> str:
-        text = ""
-        if self.sort_index == 0 and self._raw and self._raw != len(rows):
-            text = (f"{self._raw:,} calls in {len(rows):,} rows "
-                    "· identical calls within a minute share a row")
-        else:
-            text = f"{len(rows):,} most recent calls across the three trackers"
+    def extra_note(self) -> str:
+        text = "newest calls from the three trackers"
+        if self.sort_index == 0 and self._raw and self._raw != len(self._rows):
+            text = f"{self._raw:,} calls, merged per minute"
         home = str(Path.home())
-        if rows and all(not r.project or r.project == home for r in rows):
-            text += " · every call ran from ~, so the project column is blank"
+        if self._rows and all(not r.project or r.project == home for r in self._rows):
+            text += " · all from ~"
         return text
 
 
@@ -586,6 +598,7 @@ class DashboardPane(Pane):
 
     DEFAULT_CSS = """
     DashboardPane { height: 1fr; padding: 0 1; }
+    DashboardPane #note { height: auto; color: $text-muted; }
     DashboardPane #kpi { height: 3; }
     DashboardPane #chart { height: auto; }
     DashboardPane #tops { height: 1fr; }
@@ -603,6 +616,7 @@ class DashboardPane(Pane):
         self._sel = 0
 
     def compose(self) -> ComposeResult:
+        yield Static(id="note")
         yield Static(id="kpi")
         yield Static(id="chart")
         with Horizontal(id="tops"):
@@ -643,8 +657,16 @@ class DashboardPane(Pane):
         rows = max(2, height - 3 - 1 - 2 - chart_h)
         return width, chart_h, rows
 
+    def _note_text(self) -> Text:
+        out = Text(f"{len(self._models)} models · {len(self._skills)} skills")
+        out.append(" · ↑↓ pick a model")
+        if self._models:
+            out.append(f" · enter opens Tokens for {self._models[self._sel].model}")
+        return out
+
     def _paint(self) -> None:
         width, chart_h, rows = self._layout()
+        self.query_one("#note", Static).update(self._note_text())
         self.query_one("#kpi", Static).update(self._kpi_text(width))
         self.query_one("#chart", Static).update(self._chart_text(width, chart_h))
         self._paint_tops(rows, width)
@@ -780,6 +802,7 @@ class DashboardPane(Pane):
             return
         self._sel = max(0, min(len(self._models) - 1, self._sel + delta))
         width, _chart_h, rows = self._layout()
+        self.query_one("#note", Static).update(self._note_text())
         self._paint_tops(rows, width)
 
     def action_open_row(self) -> None:
@@ -789,10 +812,6 @@ class DashboardPane(Pane):
         if self._models:
             self.app.open_tokens_for(self._models[self._sel].model)
 
-    def status(self) -> str:
-        if not self._models:
-            return "no models in this window"
-        return f"up/down picks a model · enter opens Tokens for {self._models[self._sel].model}"
 
 
 class SourcesPane(Pane):
@@ -802,8 +821,8 @@ class SourcesPane(Pane):
 
     DEFAULT_CSS = """
     SourcesPane { height: 1fr; }
+    SourcesPane #note { height: auto; padding: 0 1; color: $text-muted; }
     SourcesPane DataTable { height: 1fr; }
-    SourcesPane #note { height: 1; padding: 0 1; color: $text-muted; }
     """
 
     COLUMNS = ("source", "tokens", "share", "sessions", "7d trend", "last seen",
@@ -819,8 +838,8 @@ class SourcesPane(Pane):
         self._visible: tuple[str, ...] = ()
 
     def compose(self) -> ComposeResult:
-        yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
         yield Static(id="note")
+        yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
 
     def on_mount(self) -> None:
         self._paint_columns(self.app.size.width)
@@ -907,9 +926,10 @@ class SourcesPane(Pane):
     def _note(self) -> None:
         problems = [f"{s.label}: {s.note}" for s in self._snaps
                     if s.status in ("missing", "error") or not s.tokens_real]
-        text = "enter opens that tracker's own TUI · r syncs all three"
+        text = (f"{len(self._snaps)} trackers · enter opens one in its own TUI "
+                "· q there returns here")
         if problems:
-            text += " · " + " · ".join(problems)
+            text += "\n" + " · ".join(problems)
         self.query_one("#note", Static).update(text)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -921,8 +941,6 @@ class SourcesPane(Pane):
         if 0 <= index < len(self._snaps):
             self.app.open_tracker(self._snaps[index].key)
 
-    def status(self) -> str:
-        return "enter opens a tracker · q there returns here"
 
 
 class CallsTable(Vertical):
@@ -1032,6 +1050,9 @@ class EntityScreen(Screen[None]):
 class AutApp(App[None]):
     TITLE = "aut"
     SUB_TITLE = "all usage trackers"
+    # The footer is the key list here; a second, hidden one behind ^p is noise,
+    # and the three trackers turn it off for the same reason.
+    ENABLE_COMMAND_PALETTE = False
 
     CSS = """
     Screen { background: $surface; }
@@ -1044,33 +1065,33 @@ class AutApp(App[None]):
     #bar #range { width: 24; }
     #bar SelectCurrent { border: none; padding: 0 1; background: $panel;
                          color: $accent; }
-    #foot { dock: bottom; height: 2; }
-    #status { height: 1; padding: 0 1; background: $boost; }
-    #hint { height: 1; padding: 0 1; color: $text-muted; }
+    /* In the flow, not docked: the tabs take 1fr, so this lands directly above
+       the footer exactly as it does in the three trackers. */
+    #status { height: 1; padding: 0 1; color: $text-muted; }
     TabbedContent { height: 1fr; }
-    #help-box { width: 74; height: auto; padding: 1 2; background: $panel;
+    #help-box { width: 82; height: auto; padding: 1 2; background: $panel;
                 border: round $accent; margin: 2 4; }
     #help-title { padding: 0 0 1 0; }
     """
 
     BINDINGS = [
-        Binding("q", "quit", "quit"),
-        Binding("r", "sync", "sync"),
-        Binding("s", "sort", "sort"),
-        Binding("slash", "filter", "filter"),
-        Binding("d", "date_range", "date"),
-        Binding("g", "group", "group"),
-        Binding("enter", "open_row", "open"),
-        Binding("tab", "next_tab", "next tab", priority=True),
-        Binding("shift+tab", "prev_tab", "prev tab", priority=True),
+        Binding("tab", "next_tab", "Next tab", priority=True),
+        Binding("shift+tab", "prev_tab", "Prev tab", priority=True),
+        Binding("q", "quit", "Quit"),
+        Binding("r", "sync", "Sync now"),
+        Binding("s", "sort", "Sort"),
+        Binding("slash", "filter", "Filter"),
+        Binding("d", "date_range", "Date"),
+        Binding("g", "group", "Group"),
+        Binding("enter", "open_row", "Open"),
         Binding("1", "goto_tab(0)", "1", show=False),
         Binding("2", "goto_tab(1)", "2", show=False),
         Binding("3", "goto_tab(2)", "3", show=False),
         Binding("4", "goto_tab(3)", "4", show=False),
         Binding("5", "goto_tab(4)", "5", show=False),
         Binding("6", "goto_tab(5)", "6", show=False),
-        Binding("question_mark", "help", "help"),
-        Binding("escape", "clear_filter", "clear", show=False),
+        Binding("question_mark", "help", "Help"),
+        Binding("escape", "clear_filter", "Clear", show=False),
     ]
 
     def __init__(self) -> None:
@@ -1099,10 +1120,11 @@ class AutApp(App[None]):
                 yield UsagePane()
             with TabPane("Sources", id="tab-sources"):
                 yield SourcesPane()
-        # Two docked rows at the same edge overlap, so they share one container:
-        # the status line names the window, the sort and the sync age; the hint
-        # below it names the keys.
-        yield Vertical(Static(id="status"), Static(HINT, id="hint"), id="foot")
+        # Provenance, then the key footer: the window and the sort belong to the
+        # tab and are named above its table, so this line says what was read and
+        # when, not what the page is showing.
+        yield Static(id="status")
+        yield Footer()
 
     def on_mount(self) -> None:
         self.reload_active()
@@ -1155,12 +1177,22 @@ class AutApp(App[None]):
                 select.value = window
         except Exception:
             pass
-        parts = [f"[b]{label}[/b]"]
-        pane_status = self.pane().status()
-        if pane_status:
-            parts.append(pane_status)
+        parts = []
+        total = 0
+        missing = 0
+        for source in SOURCES:
+            path = source.db_path
+            if path.is_file():
+                total += path.stat().st_size
+            else:
+                missing += 1
+        parts.append(f"{len(SOURCES) - missing} of {len(SOURCES)} indexes")
+        if total:
+            parts.append(_human_size(total))
+        if missing:
+            parts.append(f"{missing} missing")
         parts.append(f"synced {fmt_age(self._synced_ms)}")
-        self.query_one("#status", Static).update("   ·   ".join(parts))
+        self.query_one("#status", Static).update(" · ".join(parts))
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         self.reload_active()

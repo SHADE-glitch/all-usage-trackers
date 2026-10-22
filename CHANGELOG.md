@@ -4,6 +4,40 @@ Original project, **no upstream**. This records the decisions that are not
 obvious from the code — the ones a change in one of the three trackers, in
 Textual, or in a schema can invalidate.
 
+## 0.3.1
+
+The screen now has the three trackers' chrome: state above the table, keys in the
+footer.
+
+### Changed
+
+- **The per-tab state line moved above its table** and names both keys:
+  `5 rows · sort: total ▼ (s) · grouping: by model (g) · total 144.19M`. It used to
+  sit under the table, where it read as a footnote to a reorder nobody could see.
+- **The bottom is the family's**: a provenance line (`3 of 3 indexes · 87.2 MB ·
+  synced 0s ago`) and Textual's `Footer` with the key list, replacing the
+  hand-written hint string.
+- **Bindings are described in Title Case** (`Sync now`, `Sort`, `Filter`) and
+  `ENABLE_COMMAND_PALETTE = False`, both matching the three trackers.
+
+### Fixed
+
+- **The hidden-columns note never appeared on Tokens.** It compared against
+  `COLUMNS`, which that pane no longer defines — its column set depends on `g`.
+  The full set now comes from `columns_for()`, so the second line reads
+  `7 of 10 columns · hidden: provider, cache r, cache w · widen to see them`.
+- **The help box was narrower than its own text**, so every line wrapped.
+
+### Decisions worth remembering
+
+- **State above, provenance below.** The caption answers "what am I looking at
+  and how is it ordered"; the bottom line answers "what was read and when". The
+  two were one line before, which is why the sort was invisible.
+- **The caption is per pane, not per app.** It lives in the pane that owns the
+  state, so a tab switch cannot show another tab's sort.
+- **The footer is Textual's, not a string.** It follows `BINDINGS`, so a new key
+  appears without a second edit — and it can hide what does not apply.
+
 ## 0.3.0
 
 The dashboard was rebuilt, the Tokens tab learned what a model is, and the
