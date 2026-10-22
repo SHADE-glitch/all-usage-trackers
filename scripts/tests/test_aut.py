@@ -34,6 +34,7 @@ CREATE TABLE model_responses (
     prompt_tokens INTEGER, completion_tokens INTEGER,
     cache_read_input_tokens INTEGER, cache_creation_input_tokens INTEGER,
     provider_total_tokens INTEGER,
+    prompt_cache_hit_tokens INTEGER, prompt_cache_miss_tokens INTEGER,
     credit REAL, ts INTEGER, project TEXT, usage_available INTEGER DEFAULT 0
 );
 """
@@ -147,20 +148,21 @@ class TestCbut(AdapterCase):
     def _fill(self) -> None:
         conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
         rows = [
-            ("m1", "s1", "claude-sonnet", "anthropic", 100, 50, 0, 1.5, self.now, "/p/one", 1),
-            ("m2", "s1", "claude-sonnet", "anthropic", 200, 100, 0, 3.0, self.now - 1000, "/p/one", 1),
-            ("m3", "s2", "gpt-5", "openai", 0, 0, 900, None, self.now - 2 * DAY_MS, "/p/two", 1),
-            ("m4", "s3", "old", "x", 10, 10, 0, None, self.now - 40 * DAY_MS, "/p/two", 1),
+            ("m1", "s1", "claude-sonnet", "anthropic", 100, 50, 0, 1.5, self.now, "/p/one", 1, 0),
+            ("m2", "s1", "claude-sonnet", "anthropic", 200, 100, 0, 3.0, self.now - 1000, "/p/one", 1, 0),
+            ("m3", "s2", "gpt-5", "openai", 300, 100, 900, None, self.now - 2 * DAY_MS, "/p/two", 1, 500),
+            ("m4", "s3", "old", "x", 10, 10, 0, None, self.now - 40 * DAY_MS, "/p/two", 1, 0),
         ]
-        conn.executemany("INSERT INTO model_responses (message_id, session_id, model, provider, prompt_tokens, completion_tokens, provider_total_tokens, credit, ts, project, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
+        conn.executemany("INSERT INTO model_responses (message_id, session_id, model, provider, prompt_tokens, completion_tokens, provider_total_tokens, credit, ts, project, usage_available, prompt_cache_hit_tokens) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         conn.commit()
         conn.close()
 
     def test_totals_and_sessions(self):
         self._fill()
         snap = self.snapshot("cbut", days=7)
-        # provider_total_tokens wins when present, otherwise prompt+completion.
-        self.assertEqual(snap.tokens, 150 + 300 + 900)
+        # Usage Total, as cbut's own panels define it: prompt + completion +
+        # cache hit. m3's provider total is not read; its cache hit is.
+        self.assertEqual(snap.tokens, 150 + 300 + (300 + 100 + 500))
         self.assertEqual(snap.calls, 3)
         self.assertEqual(snap.sessions, 2)
         self.assertEqual(snap.status, "ok")
@@ -181,7 +183,7 @@ class TestCbut(AdapterCase):
         snap = self.snapshot("cbut", days=7)
         self.assertEqual(len(snap.buckets), 7)
         self.assertEqual(snap.buckets[-1], 450)          # today: m1 + m2
-        self.assertEqual(snap.buckets[-3], 900)          # two days back
+        self.assertEqual(snap.buckets[-3], 900)          # two days back: m3
         self.assertEqual(sum(snap.buckets), 1350)
 
     def test_all_time_window_caps_the_sparkline_at_thirty_days(self):
@@ -501,12 +503,20 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
         app = AutApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.pause()
-            for wid in ("#kpi", "#chart", "#top-models", "#top-skills"):
+            for wid in ("#kpi", "#top-models", "#top-skills"):
                 card = app.query_one(wid, Static)
                 self.assertEqual(str(card.styles.border_top[0]), "round", wid)
             note = app.query_one("#note", Static)
             kpi = app.query_one("#kpi", Static)
             self.assertLess(note.region.y, kpi.region.y)
+            # The lists are as tall as their rows and the pane is what scrolls
+            # once the two no longer fit — a fixed card height hid the tail of
+            # a long model list with no key that reached it.
+            from textual.css.scalar import Unit
+
+            height = app.query_one("#top-models", Static).styles.height
+            self.assertEqual(height.unit, Unit.AUTO)
+            self.assertEqual(str(app.pane().styles.overflow_y), "auto")
 
     async def test_the_caption_above_the_table_names_sort_and_grouping(self):
         from textual.widgets import Static
@@ -522,7 +532,7 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             table = pane.query_one(DataTable)
             self.assertLess(note.region.y, table.region.y)
             caption = str(note.render())
-            self.assertIn("sort: total", caption)
+            self.assertIn("sort: usage total", caption)
             self.assertIn("grouping: by model", caption)
 
             await pilot.press("g")
@@ -592,44 +602,7 @@ if __name__ == "__main__":
 
 
 class TestChart(unittest.TestCase):
-    """The drawing, pinned glyph by glyph — a chart is easy to lie with."""
-
-    def test_every_series_shares_one_scale(self):
-        import aut_chart
-
-        lines = aut_chart.stacked_chart({"a": [10, 1]}, ["00", "01"],
-                                        width=40, height=10, styles={})
-        body = lines[:10]
-        axis = max(4, len("10")) + 2
-        tall = sum(1 for line in body if line.plain[axis] != " ")
-        short = sum(1 for line in body if line.plain[axis + 1] != " ")
-        self.assertEqual(tall, 10)
-        self.assertEqual(short, 1)
-
-    def test_the_axis_is_labelled_from_zero(self):
-        import aut_chart
-
-        lines = aut_chart.stacked_chart({"a": [4] * 7}, ["x"] * 7,
-                                        width=60, height=5, styles={})
-        axis = [line.plain for line in lines[:5]]
-        self.assertIn("0", axis[-1])
-        self.assertIn("4", axis[0])
-
-    def test_x_labels_are_anchored_to_the_newest_bucket(self):
-        import aut_chart
-
-        labels = [f"{hour:02d}" for hour in range(24)]
-        lines = aut_chart.stacked_chart({"a": [1] * 24}, labels,
-                                        width=80, height=4, styles={})
-        self.assertTrue(lines[-1].plain.rstrip().endswith("23"))
-        self.assertGreater(len(lines[-1].plain.strip()), 2)
-
-    def test_an_empty_window_says_so_instead_of_drawing_nothing(self):
-        import aut_chart
-
-        lines = aut_chart.stacked_chart({}, [], width=40, height=5, styles={})
-        self.assertEqual(len(lines), 1)
-        self.assertIn("no usage", lines[0].plain)
+    """The bars, pinned glyph by glyph — a proportion is easy to lie with."""
 
     def test_share_bar_is_full_for_the_largest_and_empty_at_zero(self):
         import aut_chart

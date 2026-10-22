@@ -4,6 +4,40 @@ Original project, **no upstream**. This records the decisions that are not
 obvious from the code — the ones a change in one of the three trackers, in
 Textual, or in a schema can invalidate.
 
+## 0.5.0
+
+One token number everywhere, and a dashboard that fits its content.
+
+### Changed
+
+- **Every token figure is the tracker's Usage Total.** The three adapters each
+  restate the definition their own tracker's panels use (cbut: prompt +
+  completion + cache hit; ocut: full prompt + output + the hit re-added; qcut:
+  input + output + cache read), and `snapshot` / `daily` / `by_day` all read
+  that one expression. The separate `token_expr` field — the API-side provider
+  total, which had drifted from the Usage Total the panels print — is deleted:
+  two totals in one adapter meant the KPI strip, the per-day buckets and the
+  top-model ranking could each answer a different question.
+- **Token columns are named for what they are.** `total` reads `usage total`
+  on Tokens, Usage, Sources and the dashboard KPI strip, so a number that says
+  neither input, output nor cache is always the Usage Total.
+
+### Removed
+
+- **The dashboard's stacked chart and the tokens-per-day strip.** The chart
+  duplicated what the Tokens tab's per-day buckets draw with real sorting and
+  real filters; the strip read the retired API total, so its caption said
+  "tokens" while every other number on the screen said something else.
+- **Recent calls** from the dashboard. It repeated the Usage tab's newest rows
+  in a narrower box with no way to open them.
+
+### Layout
+
+- The dashboard's bottom half is two cards — top models and top skills — that
+  grow with their rows (`height: auto`) inside a pane that scrolls
+  (`overflow-y: auto`) once the screen is full. A list that outgrew its fixed
+  row count used to be silently truncated; now nothing is cut.
+
 ## 0.4.0
 
 The board is driven from its footer now: every tab lists exactly the keys it

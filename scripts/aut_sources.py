@@ -52,7 +52,6 @@ class Source:
     db_name: str
     binary: str
     table: str
-    token_expr: str
     cost_expr: str
     real_col: str
     cost_unit: str
@@ -120,7 +119,7 @@ class Source:
         # numbers on one screen end up disagreeing.
         since = cutoff_ms(days, now) if since_ms is None else since_ms
         total, cost, calls, sessions, last_ts, real_avg = conn.execute(
-            f"SELECT SUM({self.token_expr}), SUM({self.cost_expr}), COUNT(*),"
+            f"SELECT SUM({self.expr_total}), SUM({self.cost_expr}), COUNT(*),"
             f" COUNT(DISTINCT session_id), MAX(ts), AVG({self.real_col})"
             f" FROM {self.table} WHERE ts >= ?",
             (since,),
@@ -140,7 +139,7 @@ class Source:
         width = spark_width(days)
         bucket_since = now - width * DAY_MS
         rows = conn.execute(
-            f"SELECT date(ts/1000,'unixepoch','localtime') AS d, SUM({self.token_expr})"
+            f"SELECT date(ts/1000,'unixepoch','localtime') AS d, SUM({self.expr_total})"
             f" FROM {self.table} WHERE ts >= ? GROUP BY d",
             (bucket_since,),
         ).fetchall()
@@ -175,7 +174,7 @@ class Source:
     def _top(self, conn: sqlite3.Connection, column: str, since: int) -> list[tuple[str, int]]:
         expr = self.expr_project if column == "project" else column
         rows = conn.execute(
-            f"SELECT {expr}, SUM({self.token_expr}) AS t FROM {self.table}"
+            f"SELECT {expr}, SUM({self.expr_total}) AS t FROM {self.table}"
             f" WHERE ts >= ? AND {expr} IS NOT NULL AND {expr} != ''"
             f" GROUP BY {expr} ORDER BY t DESC LIMIT 3",
             (since,),
@@ -190,10 +189,6 @@ SOURCES: tuple[Source, ...] = (
         db_name="codebuddy-usage-tracker",
         binary="cbut",
         table="model_responses",
-        token_expr=(
-            "COALESCE(NULLIF(provider_total_tokens, 0),"
-            " COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))"
-        ),
         cost_expr="credit",
         real_col="usage_available",
         cost_unit="cr",
@@ -201,9 +196,12 @@ SOURCES: tuple[Source, ...] = (
         expr_output="COALESCE(completion_tokens, 0)",
         expr_cache_read="COALESCE(cache_read_input_tokens, 0)",
         expr_cache_write="COALESCE(cache_creation_input_tokens, 0)",
+        # Usage Total, as cbut's own panels define it: the full prompt plus the
+        # output, plus the cache hit again (the display-only re-add the family
+        # uses). The API-side provider total is no longer surfaced anywhere.
         expr_total=(
-            "COALESCE(NULLIF(provider_total_tokens, 0),"
-            " COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))"
+            "COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0)"
+            " + COALESCE(prompt_cache_hit_tokens, 0)"
         ),
         expr_project="COALESCE(project, '')",
     ),
@@ -213,10 +211,6 @@ SOURCES: tuple[Source, ...] = (
         db_name="opencode-usage-tracker",
         binary="ocut",
         table="model_calls",
-        token_expr=(
-            "COALESCE(NULLIF(total_tokens, 0),"
-            " COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))"
-        ),
         cost_expr="cost",
         real_col="usage_available",
         cost_unit="$",
@@ -224,9 +218,12 @@ SOURCES: tuple[Source, ...] = (
         expr_output="COALESCE(completion_tokens, 0)",
         expr_cache_read="COALESCE(cache_read, 0)",
         expr_cache_write="COALESCE(cache_write, 0)",
+        # Usage Total, as ocut's panels define it: ocut reports an *uncached*
+        # prompt, so the full prompt is prompt + read + write, and the cache
+        # read is re-added once more — the same shape as cbut's number.
         expr_total=(
-            "COALESCE(NULLIF(total_tokens, 0),"
-            " COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0))"
+            "COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0)"
+            " + 2 * COALESCE(cache_read, 0) + COALESCE(cache_write, 0)"
         ),
         expr_project="COALESCE(NULLIF(directory, ''), project, '')",
     ),
@@ -236,7 +233,6 @@ SOURCES: tuple[Source, ...] = (
         db_name="qoder-cn-usage-tracker",
         binary="qcut",
         table="model_calls",
-        token_expr="COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)",
         cost_expr="credits",
         real_col="has_usage",
         cost_unit="cr",
@@ -244,7 +240,9 @@ SOURCES: tuple[Source, ...] = (
         expr_output="COALESCE(output_tokens, 0)",
         expr_cache_read="COALESCE(cache_read_tokens, 0)",
         expr_cache_write="COALESCE(cache_creation_tokens, 0)",
-        expr_total="COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)",
+        # Usage Total, as qcut's panels define it: input + output + cache read.
+        expr_total=("COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)"
+                    " + COALESCE(cache_read_tokens, 0)"),
         # qcut's model_calls carries the path in 'project' only; 'cwd' lives on
         # its sessions table, not here.
         expr_project="COALESCE(project, '')",

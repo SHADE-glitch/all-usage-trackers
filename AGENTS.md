@@ -47,11 +47,17 @@ This repository is public.
   into `fail` — those are guesses, not facts. Models *do* merge by name across
   trackers (that is the point of the Tokens tab); provider is a column, not a
   split.
-- **One chart, one scale.** Every series in a chart shares a y axis. Two
-  sparklines normalised to their own maximum draw a 12M and an 81M source at the
-  same height, which is a lie the eye cannot catch.
-- **The window is the chart.** A one-day window draws hours. Do not borrow days
-  from outside the window to make a chart look fuller.
+- **One number, labelled.** Every token figure the board prints is the tracker's
+  own Usage Total (cbut: prompt + completion + cache hit; ocut: full prompt +
+  output + the hit re-added; qcut: input + output + cache read). The providers'
+  own API totals are not read anywhere. A number that says neither input, output
+  nor cache is the Usage Total, and a second unlabelled total beside it is a bug.
+- **One bar, one scale.** Every bar in a table shares its scale; a bar scaled to
+  its own row would draw a 12M and an 81M source at the same height, which is a
+  lie the eye cannot catch. The percentage beside it is its share of the window.
+- **Cards grow, then the pane scrolls.** A list card takes the height its rows
+  need — never a fixed row count that silently hides the rest — and the pane
+  scrolls once the screen is full.
 - **Keep the three TUIs untouched.** Going deeper is `suspend()` + the tracker's
   own binary, never a re-implementation of its views.
 - **Keep the keys aligned with the family.** `r` syncs, `s` sorts, `/` filters,

@@ -23,7 +23,7 @@
 
 | Tab | What it shows |
 | :--- | :--- |
-| **Dashboard** | the window's tokens, sessions and calls, the change against the previous window of the same length, a stacked chart of the window itself (hourly for a day, daily beyond), top models, top skills, tokens per call per tracker, and the last calls |
+| **Dashboard** | the window's usage total, sessions and calls, the change against the previous window of the same length, top models and top skills as two cards that grow with their rows (the pane scrolls), and the window caption |
 | **Tools** | one row per tool, with the calls each tracker made, ok / fail, average duration and last use |
 | **Skills** | the same shape for skills — the one place a skill's use in CodeBuddy and OpenCode sits on one line |
 | **Tokens** | **one row per model**, merged across trackers by name, with a column per tracker; `g` cycles to model × tracker, then one row per tracker |
@@ -91,8 +91,9 @@ The screen is laid out like the three trackers: the state line (rows, sort, grou
 - **ok / fail / pending** come from the status the hosts actually write: `completed` is ok; `error`, `incomplete` and `cancelled` are failures; `running`, `backgrounded` and no status at all are pending, which is not a failure.
 - **One model is one row.** The same model name through three trackers is one total with three columns, because "what did this model cost me" has one answer. Names merge case-insensitively; `g` still shows the per-tracker rows when that is what you want.
 - **Tool names merge case-insensitively** (`Read` in one tracker, `read` in another, one row). `Bash` and `shell` stay apart: whether they are the same tool is a guess this app does not make.
-- **One chart, one scale.** Every series in a chart shares a y-axis, so a 12M tracker and an 81M tracker do not draw the same bar. The percentage beside a bar is its share of the window; the bar itself is scaled to the largest row.
-- **The window is the chart.** `Today` draws today's hours, `7d` draws seven days — never a week hidden inside a day.
+- **One number, labelled.** Every token figure the board prints is the tracker's own **Usage Total** — the definition each tracker's panels use (cbut: prompt + completion + cache hit; ocut: full prompt + output + the hit re-added; qcut: input + output + cache read). The providers' own API totals are no longer read anywhere; a number that says neither input, output nor cache is always the Usage Total.
+- **One bar, one scale.** Every bar in a table shares its scale, so a 12M tracker and an 81M tracker do not draw the same bar. The percentage beside a bar is its share of the window; the bar itself is scaled to the largest row.
+- **Cards grow, then the pane scrolls.** A list card takes the height its rows need instead of truncating to a fixed row count; the dashboard pane scrolls once the screen is full, so nothing is silently cut.
 - **Two numbers on one screen count the same calls.** The Sources tab takes its window from the tab, not from "the last N×24 hours", so it agrees with the KPI strip above it.
 - **There is no `a` key.** The trackers use it for "installed but never used", which has no cross-tool meaning here.
 

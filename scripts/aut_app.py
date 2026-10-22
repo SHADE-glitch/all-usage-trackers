@@ -30,7 +30,7 @@ from textual.widgets import (Button, DataTable, Footer, Input, Select, Static,
                              TabbedContent, TabPane)
 
 import aut_model as model
-from aut_chart import pct, share_bar, stacked_chart
+from aut_chart import pct, share_bar
 from aut_db import DAY_MS, fmt_age, fmt_tokens, sparkline
 from aut_picker import (CustomWindow, DateRangeModal, RANGE_LABELS, bounds_of,
                         window_label)
@@ -394,15 +394,18 @@ class TokensPane(TablePane):
         "source": "by tracker",
     }
     COLUMN_SETS = {
-        "model": ("model", "total", "cbut", "ocut", "qcut", "req", "last used"),
+        "model": ("model", "usage total", "cbut", "ocut", "qcut", "req",
+                  "last used"),
         "calls": ("source", "model", "provider", "input", "output", "cache r",
-                  "cache w", "total", "req", "last used"),
-        "source": ("source", "total", "input", "output", "cache r", "cache w",
-                   "req", "last used"),
+                  "cache w", "usage total", "req", "last used"),
+        "source": ("source", "usage total", "input", "output", "cache r",
+                   "cache w", "req", "last used"),
     }
     COLUMN_WIDTHS = {"source": 10, "model": 28, "provider": 12, "req": 6,
-                     "last used": 10, "cbut": 8, "ocut": 8, "qcut": 8}
-    SORT_FIELDS = (("tokens", "total", "total"), ("requests", "requests", "req"),
+                     "last used": 10, "cbut": 8, "ocut": 8, "qcut": 8,
+                     "usage total": 12}
+    SORT_FIELDS = (("usage total", "total", "usage total"),
+                   ("requests", "requests", "req"),
                    ("recent", "last_used", "last used"), ("name", "model", "model"))
 
     # Below these widths the cache split is what pushes the model name out of
@@ -435,7 +438,7 @@ class TokensPane(TablePane):
         if isinstance(row, model.ModelTotal):
             return {
                 "model": row.model,
-                "total": f"{fmt_tokens(row.total):>7}",
+                "usage total": f"{fmt_tokens(row.total):>7}",
                 "cbut": self._per(row, "cbut"),
                 "ocut": self._per(row, "ocut"),
                 "qcut": self._per(row, "qcut"),
@@ -450,7 +453,7 @@ class TokensPane(TablePane):
             "output": f"{fmt_tokens(row.output):>8}",
             "cache r": f"{fmt_tokens(row.cache_read):>8}",
             "cache w": f"{fmt_tokens(row.cache_write):>8}",
-            "total": f"{fmt_tokens(row.total):>8}",
+            "usage total": f"{fmt_tokens(row.total):>8}",
             "req": f"{row.requests:>6,}",
             "last used": fmt_age(row.last_used),
         }
@@ -549,10 +552,10 @@ class EntityPane(TablePane):
 
 class UsagePane(TablePane):
     TAB_KEY = "usage"
-    COLUMNS = ("when", "source", "model", "tokens", "project", "session")
-    COLUMN_WIDTHS = {"when": 10, "source": 10, "model": 24, "tokens": 10,
+    COLUMNS = ("when", "source", "model", "usage total", "project", "session")
+    COLUMN_WIDTHS = {"when": 10, "source": 10, "model": 24, "usage total": 12,
                      "project": 36, "session": 9}
-    SORT_FIELDS = (("time", "ts", "when"), ("tokens", "total", "tokens"),
+    SORT_FIELDS = (("time", "ts", "when"), ("usage total", "total", "usage total"),
                    ("source", "source", "source"))
 
     def __init__(self) -> None:
@@ -578,7 +581,7 @@ class UsagePane(TablePane):
             "when": fmt_age(row.ts),
             "source": Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
             "model": row.model or Text("—", style="dim"),
-            "tokens": tokens,
+            "usage total": tokens,
             "project": _project(row.project, self.COLUMN_WIDTHS["project"]),
             "session": row.session[:8] or Text("—", style="dim"),
         }
@@ -594,27 +597,29 @@ class UsagePane(TablePane):
 
 
 class DashboardPane(Pane):
-    """The screen that answers "where did the tokens go, and is that more?".
+    """The screen that answers "where did the usage go, and is that more?".
 
-    Three panels, one time scale: a KPI strip, one chart whose every series
-    shares a y-axis, and two ranked lists that show proportion rather than
-    asking the reader to divide two numbers. The window you pick is the window
-    drawn — a "today" chart that quietly shows a week is how a dashboard stops
-    meaning anything.
+    One window, three cards: the KPI strip, then the models and the skills that
+    account for it, each ranked with its share so the reader does not have to
+    divide two numbers. Every token on this screen is the Usage Total — the same
+    number the Tokens and Usage tabs rank by.
     """
 
     TAB_KEY = "dashboard"
     can_focus = True
 
     DEFAULT_CSS = """
-    DashboardPane { height: 1fr; padding: 0 1; }
+    DashboardPane { height: 1fr; padding: 0 1; overflow-y: auto; }
     DashboardPane #note { height: auto; color: $text-muted; }
     /* Rounded cards, as the three trackers draw their summary panels: title on
        the first row inside the border, values under it. */
     DashboardPane .card { border: round $primary; padding: 0 1; height: auto; }
     DashboardPane #kpi { height: 5; }
-    DashboardPane #tops { height: 1fr; }
-    DashboardPane #tops .card { width: 1fr; height: 1fr; }
+    /* Each list is as tall as its rows, and the pane scrolls once the two of
+       them no longer fit: a fixed height hid every model past the tenth with no
+       way to reach it. */
+    DashboardPane #tops { height: auto; }
+    DashboardPane #tops .card { width: 1fr; height: auto; }
     DashboardPane #tops .left { margin: 0 1 0 0; }
     """
 
@@ -622,7 +627,6 @@ class DashboardPane(Pane):
         super().__init__()
         self.window = None
         self._kpis = model.kpis(None, model.now_ms())
-        self._timeline = model.Timeline(unit="day", labels=[])
         self._models: list[model.ModelTotal] = []
         self._skills: list = []
         self._recent: list = []
@@ -630,7 +634,6 @@ class DashboardPane(Pane):
     def compose(self) -> ComposeResult:
         yield Static(id="note")
         yield Static(id="kpi", classes="card")
-        yield Static(id="chart", classes="card")
         with Horizontal(id="tops"):
             yield Static(id="top-models", classes="card left")
             yield Static(id="top-skills", classes="card")
@@ -641,11 +644,11 @@ class DashboardPane(Pane):
         self.window = window
         start, end = bounds_of(window, model.now_ms())
         self._kpis = model.kpis(start, end)
-        self._timeline = model.timeline(start, end)
         self._models = model.model_totals(model.token_rows(start, end))
         self._skills = sorted(model.entity_rows("skills", start, end),
                               key=lambda r: (r.calls, r.last_used or 0), reverse=True)
-        self._recent = model.call_rows(start, end, limit=6)
+        # One row, for the age in the caption; the list itself is gone.
+        self._recent = model.call_rows(start, end, limit=1)
         self._paint()
 
     # -- drawing ------------------------------------------------------------
@@ -657,16 +660,9 @@ class DashboardPane(Pane):
         if self.is_mounted:
             self._paint()
 
-    def _layout(self) -> tuple[int, int, int]:
-        """(width, chart height, rows left for the lists) for the current size."""
-        width = max(40, self.size.width or (self.app.size.width - 2) or 80)
-        height = self.size.height or (self.app.size.height - 4) or 30
-        # The chart takes what is left once the KPI card (5 rows) and the list
-        # cards (5 rows of content) have theirs, within bounds: fewer than 4 bar
-        # rows is a line, more than 8 is a waste.
-        chart_h = max(4, min(8, height - 18))
-        rows = max(2, height - 13 - chart_h)
-        return width, chart_h, rows
+    def _width(self) -> int:
+        """The pane's own width, falling back before the first measure."""
+        return max(40, self.size.width or (self.app.size.width - 2) or 80)
 
     def _note_text(self) -> Text:
         out = Text(f"{len(self._models)} models · {len(self._skills)} skills in this window")
@@ -675,20 +671,19 @@ class DashboardPane(Pane):
         return out
 
     def _paint(self) -> None:
-        width, chart_h, rows = self._layout()
+        width = self._width()
         # A card spends two columns on its border and two on padding.
         inner = width - 4
         self.query_one("#note", Static).update(self._note_text())
         self.query_one("#kpi", Static).update(self._kpi_text(inner))
-        self.query_one("#chart", Static).update(self._chart_text(inner, chart_h))
-        self._paint_tops(rows, width)
+        self._paint_tops(width)
 
     def _kpi_text(self, width: int = 120) -> Text:
         k = self._kpis
         total = k.tokens or 0
         out = Text("Window\n", style="bold")
         out.append(fmt_tokens(total), style="bold")
-        out.append(" tokens   ")
+        out.append(" usage total   ")
         out.append_text(_delta(k.tokens, k.prev_tokens))
         if k.prev_tokens is not None:
             out.append(f" vs {fmt_tokens(k.prev_tokens)}", style="dim")
@@ -718,27 +713,7 @@ class DashboardPane(Pane):
             out.append(f" {pct(value, total):>3}")
         return out
 
-    def _chart_text(self, width: int, height: int) -> Text:
-        chart = self._timeline
-        unit = "hour" if chart.unit == "hour" else "day"
-        out = Text()
-        out.append(f"tokens per {unit}", style="bold")
-        out.append(f"  ·  {window_label(self.window)}", style="dim")
-        totals = chart.totals
-        if totals and max(totals) > 0:
-            peak = max(totals)
-            out.append(f"  ·  peak {fmt_tokens(peak)} at {chart.labels[totals.index(peak)]}",
-                       style="dim")
-        out.append("\n")
-        lines = stacked_chart(chart.series, chart.labels, width=width,
-                              height=height, styles=SOURCE_STYLE)
-        for i, line in enumerate(lines):
-            out.append_text(line)
-            if i < len(lines) - 1:
-                out.append("\n")
-        return out
-
-    def _paint_tops(self, rows: int, width: int) -> None:
+    def _paint_tops(self, width: int) -> None:
         half = max(30, (width - 1) // 2 - 4)
         name_w = max(10, half - 22)
 
@@ -747,7 +722,7 @@ class DashboardPane(Pane):
         models.append(f"top models · {fmt_tokens(total)}\n", style="bold")
         if not self._models:
             models.append("  nothing in this window", style="dim")
-        for item in self._models[:rows]:
+        for item in self._models:
             line = Text()
             line.append(f" {item.model[:name_w]:<{name_w}}")
             line.append(f" {fmt_tokens(item.total):>7} ")
@@ -758,7 +733,7 @@ class DashboardPane(Pane):
 
         # Tokens per call is the number the split hides: a tracker can use fewer
         # tokens and still be the expensive one.
-        if len(self._models) + 4 <= rows and self._kpis.per_source_calls:
+        if self._kpis.per_source_calls:
             models.append("\nby tracker · tokens / call\n", style="bold")
             for source in SOURCES:
                 tokens = self._kpis.per_source.get(source.key)
@@ -777,7 +752,7 @@ class DashboardPane(Pane):
         side.append(f"top skills · {calls:,} calls\n", style="bold")
         if not self._skills:
             side.append("  none in this window · d widens it\n", style="dim")
-        for item in self._skills[:max(2, rows // 2)]:
+        for item in self._skills:
             line = Text()
             line.append(f" {item.name[:name_w]:<{name_w}}")
             line.append(f" {item.calls:>6,} ")
@@ -786,17 +761,6 @@ class DashboardPane(Pane):
             line.append(fmt_age(item.last_used), style="dim")
             line.append("\n")
             side.append_text(line)
-
-        if self._recent:
-            side.append("\nrecent calls\n", style="bold")
-            for call in self._recent:
-                line = Text()
-                line.append(f" {fmt_age(call.ts):>8}  ")
-                line.append(f"{call.label:<10}", style=SOURCE_STYLE.get(call.source, ""))
-                line.append(f" {call.model[:max(10, name_w - 14)]:<{max(10, name_w - 14)}}")
-                line.append(f" {fmt_tokens(call.total):>7}", style="dim")
-                line.append("\n")
-                side.append_text(line)
         self.query_one("#top-skills", Static).update(side)
 
     @staticmethod

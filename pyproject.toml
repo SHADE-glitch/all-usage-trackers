@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "all-usage-trackers"
-version = "0.4.0"
+version = "0.5.0"
 description = "One read-only six-tab overview over the local usage trackers (cbut, ocut, qcut): cross-tool totals, one chart scale, and a hand-off to each tracker's own TUI."
 readme = "README.md"
 requires-python = ">=3.11"
