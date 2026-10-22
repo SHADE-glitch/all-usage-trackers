@@ -21,6 +21,18 @@ One token number everywhere, and a dashboard that fits its content.
 - **Token columns are named for what they are.** `total` reads `usage total`
   on Tokens, Usage, Sources and the dashboard KPI strip, so a number that says
   neither input, output nor cache is always the Usage Total.
+- **One model is one row, however it is spelled.** The by-model view folded
+  case only, so `deepseek-v4.1-flash` (cbut's builtin route),
+  `deepseek-v4-1-flash` (the same model through Volcano ARK) and
+  `deepseek-v4.1-flash-free` (ocut's free route) were three rows for one model,
+  and Qoder's `dfmodel` was a fourth. `canonical_model` folds punctuation and
+  the free-route suffix, and `MODEL_ALIASES` names the ids no rule can infer —
+  Qoder's builtin routes report `provider_id` NULL, so its model picker is the
+  only source for those two. The Tokens by-model view and the dashboard read
+  the folded key; Usage, the per-call rows and the model × tracker view keep
+  each tracker's own spelling. A row carries the spellings it folded, and the
+  detail screen queries all of them — otherwise the row said 910M and the
+  drill-down 638M.
 - **The usage total leads the split on Tokens.** In the model × tracker view it
   used to sit after input / output / cache r / cache w, which read as a sum
   arriving after its parts. It is the column the table is sorted by, so it now
@@ -50,6 +62,14 @@ One token number everywhere, and a dashboard that fits its content.
 - The per-call block under the model list drops its call count below 45 columns
   of card width instead of wrapping: the per-call figure is what the block is
   for, and the count is already in the KPI strip above.
+
+### Tests
+
+- **The qcut fixture declared a `model_calls` without `provider`,** and
+  `token_rows` selects `COALESCE(provider, '')` for every source: the query
+  failed and `_per_source` swallowed it, so every qcut token row was silently
+  absent from the aggregation tests. The real index has the column; the fixture
+  now does too.
 
 ## 0.4.0
 

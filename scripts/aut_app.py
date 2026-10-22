@@ -501,9 +501,11 @@ class TokensPane(TablePane):
         if row is None:
             return
         if isinstance(row, model.ModelTotal):
-            self.app.push_screen(ModelScreen(row.model, None, self.window))
+            # Every spelling the row folded, so the drill-down totals the same.
+            self.app.push_screen(ModelScreen(row.spellings or (row.model,),
+                                             None, self.window))
         elif row.model != "(all models)":
-            self.app.push_screen(ModelScreen(row.model, row.source, self.window))
+            self.app.push_screen(ModelScreen((row.model,), row.source, self.window))
 
 
 class EntityPane(TablePane):
@@ -969,23 +971,34 @@ class ModelScreen(Screen[None]):
     BINDINGS = [Binding("escape,q", "app.pop_screen", "Back")]
 
     DEFAULT_CSS = """
-    ModelScreen #head { height: 4; padding: 1 1 0 1; }
+    /* Auto, not 4: a merged model adds the line naming its spellings. */
+    ModelScreen #head { height: auto; padding: 1 1 0 1; }
     """
 
-    def __init__(self, model_name: str, source: str | None, window) -> None:
+    def __init__(self, names: tuple[str, ...], source: str | None, window) -> None:
         super().__init__()
         # 'name' is a Textual DOMNode property; using it here raises at mount.
-        self.model_name = model_name
+        # names[0] is the spelling that carried the most tokens; the rest are
+        # the ones canonical_model folded into the same row.
+        self.model_names = names
+        self.model_name = names[0]
         self.source = source
         self.window = window
 
     def compose(self) -> ComposeResult:
         start, end = bounds_of(self.window, model.now_ms())
-        calls = model.model_calls(self.source, self.model_name, start, end)
-        labels, series = model.model_daily(self.source, self.model_name, start, end)
-        total, count = model.model_stats(self.source, self.model_name, start, end)
+        names = self.model_names
+        calls = model.model_calls(self.source, names, start, end)
+        labels, series = model.model_daily(self.source, names, start, end)
+        total, count = model.model_stats(self.source, names, start, end)
         head = Text()
         head.append(f"{self.model_name}\n", style="bold")
+        if len(names) > 1:
+            # Say what was folded: the row is a sum of these, and the records
+            # below keep each call's own spelling.
+            head.append("also recorded as ", style="dim")
+            head.append(" · ".join(names[1:]), style="dim")
+            head.append("\n")
         where = BY_KEY[self.source].label if self.source else "all trackers"
         head.append(f"{where} · {window_label(self.window)} · "
                     f"{count:,} calls · {fmt_tokens(total)} tokens")
@@ -998,7 +1011,7 @@ class ModelScreen(Screen[None]):
             # the reader cannot see.
             per: dict[str, int] = {}
             for source in SOURCES:
-                value, seen = model.model_stats(source.key, self.model_name, start, end)
+                value, seen = model.model_stats(source.key, names, start, end)
                 if seen:
                     per[source.key] = value
             head.append_text(_source_split(per, total))

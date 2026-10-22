@@ -26,7 +26,7 @@
 | **Dashboard** | the window's usage total, sessions and calls, the change against the previous window of the same length, top models and top skills as two cards that grow with their rows (the pane scrolls), and the window caption. A model row carries its origin — which tracker(s) the merged number came from |
 | **Tools** | one row per tool, with the calls each tracker made, ok / fail, average duration and last use |
 | **Skills** | the same shape for skills — the one place a skill's use in CodeBuddy and OpenCode sits on one line |
-| **Tokens** | **one row per model**, merged across trackers by name, with a column per tracker; `g` cycles to model × tracker (the usage total first, then the input / output / cache split it is made of), then one row per tracker |
+| **Tokens** | **one row per model**, merged across trackers by name, with a column per tracker; `g` cycles to model × tracker (the usage total first, then the input / output / cache split it is made of), then one row per tracker. One model recorded under two spellings — dots here, hyphens there, a free route, Qoder's internal ids — is one row; the detail names the spellings it folded and lists each call under the one its tracker wrote |
 | **Usage** | the most recent calls from all three in one timeline; identical calls within a minute share a row (`×26`), so the list shows turns rather than rows |
 | **Sources** | each tracker's health, share of the window's tokens, index size and 7-day trend; `enter` opens that tracker's own TUI |
 

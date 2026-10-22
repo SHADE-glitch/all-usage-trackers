@@ -87,8 +87,8 @@ CREATE TABLE tool_calls (
 
 QCUT_DDL = """
 CREATE TABLE model_calls (
-    message_id TEXT PRIMARY KEY, session_id TEXT, model TEXT, ts INTEGER,
-    project TEXT, input_tokens INTEGER, output_tokens INTEGER,
+    message_id TEXT PRIMARY KEY, session_id TEXT, model TEXT, provider TEXT,
+    ts INTEGER, project TEXT, input_tokens INTEGER, output_tokens INTEGER,
     cache_read_tokens INTEGER, cache_creation_tokens INTEGER,
     credits REAL, has_usage INTEGER DEFAULT 0
 );
@@ -298,6 +298,38 @@ except ImportError:  # pragma: no cover - only when the venv is missing
 class TestAggregation(AdapterCase):
     """Cross-source merging: the numbers only this app can produce."""
 
+    def _add_token_row(self, key: str, model_name: str, total: int) -> None:
+        """One call with a known Usage Total, into an index _two_sources made."""
+        db_name = {"cbut": "codebuddy-usage-tracker",
+                   "ocut": "opencode-usage-tracker",
+                   "qcut": "qoder-cn-usage-tracker"}[key]
+        path = self.home / ".local" / "share" / db_name / "usage.db"
+        if not path.exists():
+            _db(self.home, db_name,
+                {"cbut": CBUT_DDL, "ocut": OCUT_DDL, "qcut": QCUT_DDL}[key]).close()
+        conn = sqlite3.connect(path)
+        stamp = self.now - 1000
+        if key == "cbut":
+            conn.execute(
+                "INSERT INTO model_responses (message_id, session_id, model,"
+                " prompt_tokens, completion_tokens, ts, project)"
+                " VALUES (?,?,?,?,0,?,?)",
+                (f"x{model_name}", "s1", model_name, total, stamp, "/p/one"))
+        elif key == "ocut":
+            conn.execute(
+                "INSERT INTO model_calls (call_id, session_id, model, prompt_tokens,"
+                " completion_tokens, ts, project, directory)"
+                " VALUES (?,?,?,?,0,?,?,?)",
+                (f"x{model_name}", "s1", model_name, total, stamp, "h", "/p/two"))
+        else:
+            conn.execute(
+                "INSERT INTO model_calls (message_id, session_id, model,"
+                " input_tokens, output_tokens, ts, project)"
+                " VALUES (?,?,?,?,0,?,?)",
+                (f"x{model_name}", "s1", model_name, total, stamp, "/p/one"))
+        conn.commit()
+        conn.close()
+
     def _two_sources(self) -> None:
         cbut = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True)
         cbut.executemany(
@@ -360,6 +392,68 @@ class TestAggregation(AdapterCase):
         self.assertEqual(rows[0].requests, 3)
         self.assertEqual(rows[0].per_source, {"cbut": 165, "ocut": 10})
 
+    def test_a_model_is_one_row_under_every_spelling(self):
+        self._two_sources()
+        # The same model as the three trackers write it: dots here, hyphens
+        # there, and a free route that appends a suffix.
+        self._add_token_row("cbut", "deepseek-v4.1-flash", total=400)
+        self._add_token_row("cbut", "deepseek-v4-1-flash", total=200)
+        self._add_token_row("ocut", "deepseek-v4.1-flash-free", total=50)
+        rows = model.model_totals(model.token_rows(0, self.now))
+        merged = [r for r in rows if "deepseek" in r.model]
+        self.assertEqual(len(merged), 1)
+        row = merged[0]
+        self.assertEqual(row.model, "deepseek-v4.1-flash")  # the heaviest spelling
+        self.assertEqual(row.total, 650)
+        self.assertEqual(set(row.spellings),
+                         {"deepseek-v4.1-flash", "deepseek-v4-1-flash",
+                          "deepseek-v4.1-flash-free"})
+        # ... and the detail reads every one of them, not just the displayed one.
+        tokens, calls = model.model_stats(None, row.spellings, 0, self.now)
+        self.assertEqual((tokens, calls), (650, 3))
+        listed = model.model_calls(None, row.spellings, 0, self.now)
+        self.assertEqual({c.model for c in listed},
+                         {"deepseek-v4.1-flash", "deepseek-v4-1-flash",
+                          "deepseek-v4.1-flash-free"})
+
+    def test_versions_are_not_folded(self):
+        self._two_sources()
+        self._add_token_row("cbut", "deepseek-v4-flash", total=90)
+        self._add_token_row("cbut", "deepseek-v4.1-flash", total=400)
+        rows = model.model_totals(model.token_rows(0, self.now))
+        names = sorted(r.model for r in rows if "deepseek" in r.model)
+        self.assertEqual(names, ["deepseek-v4-flash", "deepseek-v4.1-flash"])
+        self.assertNotEqual(model.canonical_model("deepseek-v4-flash"),
+                            model.canonical_model("deepseek-v4.1-flash"))
+
+    def test_a_hand_kept_alias_folds_a_name_no_rule_could_infer(self):
+        self._two_sources()
+        self._add_token_row("qcut", "dfmodel", total=70)
+        with mock.patch.dict(model.MODEL_ALIASES, {"dfmodel": "m-a"}):
+            rows = model.model_totals(model.token_rows(0, self.now))
+        merged = [r for r in rows if r.model == "m-a"]
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].total, 245)
+        self.assertIn("dfmodel", merged[0].spellings)
+
+    def test_an_alias_titles_a_row_nothing_else_records(self):
+        self._two_sources()
+        self._add_token_row("qcut", "qfmodel", total=30)
+        rows = model.model_totals(model.token_rows(0, self.now))
+        row = next(r for r in rows if "qwen" in r.model)
+        self.assertEqual(row.model, "qwen3.8-flash")
+        self.assertEqual(row.spellings, ("qwen3.8-flash", "qfmodel"))
+        # The id is still queried, so the drill-down finds the calls.
+        self.assertEqual(model.model_stats(None, row.spellings, 0, self.now), (30, 1))
+
+    def test_the_shipped_aliases_point_at_the_models_their_platform_names(self):
+        # Qoder's builtin routes carry no machine-readable id, so these two are
+        # the only link between its picker and what the other two record.
+        self.assertEqual(model.canonical_model("dfmodel"),
+                         model.canonical_model("deepseek-v4.1-flash"))
+        self.assertEqual(model.canonical_model("qfmodel"),
+                         model.canonical_model("qwen3.8-flash"))
+
     def test_timeline_picks_a_unit_from_the_window(self):
         from aut_picker import bounds_of
 
@@ -378,7 +472,7 @@ class TestAggregation(AdapterCase):
 
     def test_model_detail_reads_every_tracker_when_no_source_is_given(self):
         self._two_sources()
-        calls = model.model_calls(None, "m-a", 0, self.now)
+        calls = model.model_calls(None, ("m-a",), 0, self.now)
         self.assertEqual({c.source for c in calls}, {"cbut", "ocut"})
         self.assertEqual(sum(c.total for c in calls), 175)
 

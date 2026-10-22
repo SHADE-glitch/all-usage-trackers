@@ -55,6 +55,15 @@ This repository is public.
 - **One bar, one scale.** Every bar in a table shares its scale; a bar scaled to
   its own row would draw a 12M and an 81M source at the same height, which is a
   lie the eye cannot catch. The percentage beside it is its share of the window.
+- **One model is one row — in the merged views only.** `canonical_model` in
+  `aut_model` is the single place a spelling is folded: case, `.`/`_` → `-`,
+  the free-route suffix, and `MODEL_ALIASES` for the ids no rule can infer
+  (Qoder's builtin routes carry no machine-readable id — its `provider_id` is
+  NULL). The Tokens by-model view and the dashboard read the folded key; Usage,
+  the per-call rows and the model × tracker view keep the spelling the tracker
+  wrote, and the three trackers are not touched at all. A row carries its
+  `spellings` because the detail queries by them: a merged row and its
+  drill-down must total the same.
 - **A merged row names its sources.** A number that sums several trackers says
   which ones — `cbut+ocut`, `all` — because the total alone cannot be traced
   back to a tool. The tag sits beside the name and is paid for out of the name

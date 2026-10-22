@@ -18,6 +18,7 @@ Two rules hold throughout:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -36,6 +37,40 @@ ENTITY_TABLES = {
 }
 
 DAY_MS = 86_400_000
+
+# One model reaches the board under more than one name: the provider's id keeps
+# its dots ("deepseek-v4.1-flash") in one tracker and loses them
+# ("deepseek-v4-1-flash") in another, and a free route appends "-free". Those
+# are one model and one number. Only the merged views fold them — every record
+# keeps the spelling its tracker wrote.
+#
+# Names that cannot be inferred from the string itself belong here by hand,
+# keyed by the folded name, valued by the model it stands for. Nothing is
+# guessed by similarity: gpt-5.6-luna and gpt-5.6-terra are different models.
+MODEL_ALIASES: dict[str, str] = {
+    # Qoder's builtin routes report an internal id and nothing else: its
+    # provider_id column is NULL for every one of them (checked against the real
+    # index), so the label in its model picker is the only source of truth.
+    # DeepSeek-Flash is "DeepSeek-V4.1-Flash-1017" there, i.e. the model cbut
+    # and ocut already record; Qwen3.8-Flash is Qoder-only so far.
+    "dfmodel": "deepseek-v4.1-flash",
+    "qfmodel": "qwen3.8-flash",
+}
+
+
+def _folded(name: str) -> str:
+    out = re.sub(r"[._\s]+", "-", name.strip().casefold())
+    return re.sub(r"-{2,}", "-", out).strip("-")
+
+
+def canonical_model(name: str) -> str:
+    """The key that two spellings of one model share.
+
+    Punctuation and the free-route suffix, nothing else: versions are not
+    folded, so deepseek-v4-flash stays apart from deepseek-v4.1-flash.
+    """
+    key = _folded(name)
+    return re.sub(r"-free$", "", _folded(MODEL_ALIASES.get(key, key)))
 
 
 # --- rows -------------------------------------------------------------------
@@ -348,12 +383,18 @@ def now_ms() -> int:
 
 # --- detail screens ---------------------------------------------------------
 
-def model_calls(source_key: str | None, name: str, start_ms: int | None, end_ms: int,
-                limit: int = 200) -> list[CallRow]:
+def _model_in(names: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    """`model IN (?,?)` for every spelling a merged row stands for."""
+    return f"model IN ({','.join('?' for _ in names)})", names
+
+
+def model_calls(source_key: str | None, names: tuple[str, ...], start_ms: int | None,
+                end_ms: int, limit: int = 200) -> list[CallRow]:
     """Every call of one model, newest first.
 
     source_key=None means every tracker: one model is often used through more
-    than one tool, and the interesting number is the sum, not each half.
+    than one tool, and the interesting number is the sum, not each half. The
+    names are the spellings the merged row folded; each call keeps its own.
     """
     if source_key is None:
         targets = list(SOURCES)
@@ -367,25 +408,26 @@ def model_calls(source_key: str | None, name: str, start_ms: int | None, end_ms:
         conn = _connect(source)
         if conn is None:
             continue
+        clause, wanted = _model_in(names)
         try:
             rows = conn.execute(
                 f"SELECT ts, {source.expr_project}, COALESCE(session_id, ''),"
-                f" {source.expr_total} FROM {source.table}"
-                f" WHERE {where} AND model = ? ORDER BY ts DESC LIMIT ?",
-                (*params, name, limit),
+                f" {source.expr_total}, model FROM {source.table}"
+                f" WHERE {where} AND {clause} ORDER BY ts DESC LIMIT ?",
+                (*params, *wanted, limit),
             ).fetchall()
         except sqlite3.Error:
             continue
         finally:
             conn.close()
         out.extend(CallRow(ts=int(r[0]), source=source.key, label=source.label,
-                           model=name, project=str(r[1]), session=str(r[2]),
-                           total=int(r[3] or 0)) for r in rows)
+                           model=str(r[4] or ""), project=str(r[1]),
+                           session=str(r[2]), total=int(r[3] or 0)) for r in rows)
     out.sort(key=lambda r: r.ts, reverse=True)
     return out[:limit]
 
 
-def model_daily(source_key: str | None, name: str, start_ms: int | None,
+def model_daily(source_key: str | None, names: tuple[str, ...], start_ms: int | None,
                 end_ms: int) -> tuple[list[str], list[int]]:
     """One model's tokens per day, summed across every tracker when key is None."""
     if source_key is None:
@@ -401,11 +443,12 @@ def model_daily(source_key: str | None, name: str, start_ms: int | None,
         conn = _connect(source)
         if conn is None:
             continue
+        clause, wanted = _model_in(names)
         try:
             rows = conn.execute(
                 f"SELECT date(ts/1000,'unixepoch','localtime') AS d, SUM({source.expr_total})"
-                f" FROM {source.table} WHERE {where} AND model = ? GROUP BY d",
-                (*params, name),
+                f" FROM {source.table} WHERE {where} AND {clause} GROUP BY d",
+                (*params, *wanted),
             ).fetchall()
         except sqlite3.Error:
             continue
@@ -471,6 +514,9 @@ class ModelTotal:
     per_source: dict[str, int] = field(default_factory=dict)
     requests: int = 0
     last_used: int | None = None
+    # Every spelling folded into this row, the displayed one first. The detail
+    # screen queries by these, so a merged row and its drill-down agree.
+    spellings: tuple[str, ...] = ()
 
 
 HOUR_MS = 3_600_000
@@ -536,14 +582,15 @@ def timeline(start_ms: int | None, end_ms: int) -> Timeline:
 def model_totals(rows: list[TokenRow]) -> list[ModelTotal]:
     """Fold per-(source, model) rows into one row per model.
 
-    The same model is often used through two trackers; showing it twice splits
-    the number the reader came for. Case is folded so "Claude" and "claude" are
-    one model, and the row keeps the spelling that carried the most tokens.
+    The same model is often used through two trackers, and under two spellings
+    even inside one (see canonical_model); showing it twice splits the number
+    the reader came for. The row keeps the spelling that carried the most
+    tokens, and remembers the rest so the detail screen can read them all.
     """
     merged: dict[str, ModelTotal] = {}
     spellings: dict[str, dict[str, int]] = {}
     for row in rows:
-        key = row.model.casefold()
+        key = canonical_model(row.model)
         target = merged.get(key)
         if target is None:
             target = merged[key] = ModelTotal(model=row.model)
@@ -555,8 +602,19 @@ def model_totals(rows: list[TokenRow]) -> list[ModelTotal]:
             target.last_used = row.last_used
         target.per_source[row.source] = target.per_source.get(row.source, 0) + row.total
     for key, target in merged.items():
-        best = max(spellings[key].items(), key=lambda kv: kv[1])[0]
-        target.model = best
+        # The row is the model, not the platform's id for it: a spelling that is
+        # itself an alias loses, then a free-route suffix, then token weight.
+        ordered = sorted(spellings[key].items(),
+                         key=lambda kv: (_folded(kv[0]) in MODEL_ALIASES,
+                                         kv[0].casefold().endswith("-free"), -kv[1]))
+        raw = [name for name, _ in ordered]
+        # An alias names the model the platform's id stands for, so it wins the
+        # title even when it never appears in a row (a Qoder-only model has no
+        # other spelling). The id stays in the spellings, which the detail reads.
+        alias = next((MODEL_ALIASES[_folded(n)] for n in raw
+                      if _folded(n) in MODEL_ALIASES), None)
+        target.model = alias or raw[0]
+        target.spellings = (target.model, *(n for n in raw if n != target.model))
     return sorted(merged.values(), key=lambda m: m.total, reverse=True)
 
 
@@ -583,7 +641,7 @@ def collapse_calls(rows: list[CallRow], bucket_ms: int = 60_000) -> list[CallRow
     return out
 
 
-def model_stats(source_key: str | None, name: str, start_ms: int | None,
+def model_stats(source_key: str | None, names: tuple[str, ...], start_ms: int | None,
                 end_ms: int) -> tuple[int, int]:
     """(tokens, calls) for one model — the whole window, not the first 200 rows.
 
@@ -603,11 +661,12 @@ def model_stats(source_key: str | None, name: str, start_ms: int | None,
         conn = _connect(source)
         if conn is None:
             continue
+        clause, wanted = _model_in(names)
         try:
             row = conn.execute(
                 f"SELECT SUM({source.expr_total}), COUNT(*) FROM {source.table}"
-                f" WHERE {where} AND model = ?",
-                (*params, name),
+                f" WHERE {where} AND {clause}",
+                (*params, *wanted),
             ).fetchone()
         except sqlite3.Error:
             continue
