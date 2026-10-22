@@ -63,3 +63,23 @@ scripts/tests/          adapters against temp databases; one board smoke test
 Commit subjects are English. The CHANGELOG records the non-feature commits — the
 repairs, the guards, the withdrawals — and states what was true as of its commit,
 not current state.
+
+## Listed on the GitHub profile
+
+**This repository is listed on the owner's profile front page**, and this section is the reciprocal
+of `SHADE-glitch/SHADE-glitch`'s §6 index — that file is the authoritative rulebook, and
+`~/.agents/standards/STANDARD.md` §8 holds the shared listing triggers. These facts must stay true
+on the front page:
+
+- **Rename / transfer / delete** — the profile link dies; fix the row.
+- **Purpose drift** — the profile's one-line description must still be true. The claims it copies —
+  *"one read-only board"*, *"no second parser"*, *"no writes"* — are **promises**, not slogans. If the
+  board ever starts collecting or writing, the profile line is wrong the same day.
+- **Source set change** — the About names `cbut`, `ocut` and `qcut`. Dropping or adding a source
+  makes that sentence false; change it in the same commit.
+- **LICENSE change** — the profile's license badge must equal this repo's `LICENSE`.
+- **Public ↔ private** — a repo that goes private again must be **delisted**.
+
+**The GitHub About description is under the same rule.** It must describe *this* repository: the
+board that reads the three indexes and hands the terminal over — not a fourth tracker, and not a
+sibling's About copied across.
