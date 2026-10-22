@@ -33,24 +33,29 @@
 ```text
  aut · all usage trackers                                       📅 Custom…   Today ▾
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 5 models · 0 skills in this window · up/down picks a model · enter opens Tokens for dfmodel
- 144.19M tokens   ↑330% vs 33.51M   ·   122 sessions · 5,377 calls · 1 active day
- CodeBuddy 50.73M 35%   OpenCode 12.29M  9%   Qoder CN 81.17M 56%
-
- tokens per hour  ·  Today  ·  peak 50.46M at 11
- 50.5M ┤           █
-       │           █ █
- 25.2M ┤           ███
-       │          ████
-     0 ┤█         █████
-       └───────────────
-          02 05 08 11 14
-  top models · 144.19M                             top skills · 0 calls
-   dfmodel                     81.17M ██████ 56%     none in this window · d widens it
-   deepseek-v4.1-flash         50.70M ████░░ 35%
-   minimax-m3.1-flash-free     11.99M █░░░░░  8%   recent calls
-   deepseek-v4.1-flash-free      301K █░░░░░  0%      4m ago  CodeBuddy  deepseek-v4.1-flash  198K
-   glm-5.3-flash                  38K █░░░░░  0%      4m ago  CodeBuddy  deepseek-v4.1-flash  195K
+ 5 models · 0 skills · ↑↓ pick a model · enter opens Tokens for dfmodel
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Window                                                                                         │
+ │ 144.19M tokens   ↑330% vs 33.51M   ·   122 sessions · 5,377 calls · 1 active day               │
+ │ CodeBuddy 50.73M 35%   OpenCode 12.29M  9%   Qoder CN 81.17M 56%                               │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ tokens per hour  ·  Today  ·  peak 50.46M at 11                                                │
+ │ 50.5M ┤           █                                                                            │
+ │       │           █ █                                                                          │
+ │ 25.2M ┤           █ █                                                                          │
+ │       │          ████                                                                          │
+ │     0 ┤█         █████                                                                         │
+ │       └───────────────                                                                         │
+ │          02 05 08 11 14                                                                        │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ╭──────────────────────────────────────────────╮ ╭───────────────────────────────────────────────╮
+ │ top models · 144.19M                         │ │ top skills · 0 calls                          │
+ │  dfmodel                 81.17M ██████ 56%   │ │   none in this window · d widens it           │
+ │  deepseek-v4.1-flash     50.70M ████░░ 35%   │ │                                               │
+ │  minimax-m3.1-flash-fre  11.99M █░░░░░  8%   │ │ recent calls                                  │
+ │  deepseek-v4.1-flash-fr    301K █░░░░░  0%   │ │    8m ago  CodeBuddy  deepseek-v    198K      │
+ ╰──────────────────────────────────────────────╯ ╰───────────────────────────────────────────────╯
  3 of 3 indexes · 87.2 MB · synced 0s ago
  tab Next tab  shift+tab Prev tab  q Quit  r Sync now  s Sort  / Filter  d Date  g Group  ? Help
 ```

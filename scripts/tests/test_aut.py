@@ -493,6 +493,21 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pane.mode, "source")
             self.assertNotIn("provider", pane._visible)
 
+    async def test_the_dashboard_draws_its_panels_as_cards(self):
+        from textual.widgets import Static
+
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            for wid in ("#kpi", "#chart", "#top-models", "#top-skills"):
+                card = app.query_one(wid, Static)
+                self.assertEqual(str(card.styles.border_top[0]), "round", wid)
+            note = app.query_one("#note", Static)
+            kpi = app.query_one("#kpi", Static)
+            self.assertLess(note.region.y, kpi.region.y)
+
     async def test_the_caption_above_the_table_names_sort_and_grouping(self):
         from textual.widgets import Static
 

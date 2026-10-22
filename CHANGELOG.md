@@ -4,6 +4,32 @@ Original project, **no upstream**. This records the decisions that are not
 obvious from the code — the ones a change in one of the three trackers, in
 Textual, or in a schema can invalidate.
 
+## 0.3.2
+
+### Added
+
+- **Rounded cards on the Dashboard**, the way the three trackers draw their
+  summary panels: `╭─╮` around the window, the chart, and each ranked list,
+  title on the first row inside the border.
+
+### Changed
+
+- The chart card spends four columns on chrome (border + padding), so the chart
+  is drawn `width - 4` wide and the ranked lists take their name width from the
+  card, not from the pane.
+- The chart height is now chosen so the list cards keep at least five rows:
+  `max(4, min(8, height - 18))`.
+
+### Decisions worth remembering
+
+- **Cards cost rows, and the chart is the flexible one.** A card is two rows of
+  border; at 26 rows the dashboard shows a four-row chart and three list rows,
+  at 38 rows a full chart plus the tokens-per-call block. Nothing is dropped —
+  the chart shrinks first.
+- **The two bottom cards differ by one column on an odd width.** That is the
+  terminal, not a bug: `1fr` cannot split 129 columns evenly. The trackers'
+  own dashboards show the same difference.
+
 ## 0.3.1
 
 The screen now has the three trackers' chrome: state above the table, keys in the

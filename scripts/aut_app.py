@@ -599,10 +599,13 @@ class DashboardPane(Pane):
     DEFAULT_CSS = """
     DashboardPane { height: 1fr; padding: 0 1; }
     DashboardPane #note { height: auto; color: $text-muted; }
-    DashboardPane #kpi { height: 3; }
-    DashboardPane #chart { height: auto; }
+    /* Rounded cards, as the three trackers draw their summary panels: title on
+       the first row inside the border, values under it. */
+    DashboardPane .card { border: round $primary; padding: 0 1; height: auto; }
+    DashboardPane #kpi { height: 5; }
     DashboardPane #tops { height: 1fr; }
-    DashboardPane .top { width: 1fr; padding: 0 1; }
+    DashboardPane #tops .card { width: 1fr; height: 1fr; }
+    DashboardPane #tops .left { margin: 0 1 0 0; }
     """
 
     def __init__(self) -> None:
@@ -617,11 +620,11 @@ class DashboardPane(Pane):
 
     def compose(self) -> ComposeResult:
         yield Static(id="note")
-        yield Static(id="kpi")
-        yield Static(id="chart")
+        yield Static(id="kpi", classes="card")
+        yield Static(id="chart", classes="card")
         with Horizontal(id="tops"):
-            yield Static(id="top-models", classes="top")
-            yield Static(id="top-skills", classes="top")
+            yield Static(id="top-models", classes="card left")
+            yield Static(id="top-skills", classes="card")
 
     # -- data ---------------------------------------------------------------
 
@@ -651,10 +654,11 @@ class DashboardPane(Pane):
         """(width, chart height, rows left for the lists) for the current size."""
         width = max(40, self.size.width or (self.app.size.width - 2) or 80)
         height = self.size.height or (self.app.size.height - 4) or 30
-        # The chart takes what is left after the KPI strip and the ranked lists,
-        # within bounds: fewer than 4 bar rows is a line, more than 9 is a waste.
-        chart_h = max(4, min(9, height - 13))
-        rows = max(2, height - 3 - 1 - 2 - chart_h)
+        # The chart takes what is left once the KPI card (5 rows) and the list
+        # cards (5 rows of content) have theirs, within bounds: fewer than 4 bar
+        # rows is a line, more than 8 is a waste.
+        chart_h = max(4, min(8, height - 18))
+        rows = max(2, height - 13 - chart_h)
         return width, chart_h, rows
 
     def _note_text(self) -> Text:
@@ -666,15 +670,17 @@ class DashboardPane(Pane):
 
     def _paint(self) -> None:
         width, chart_h, rows = self._layout()
+        # A card spends two columns on its border and two on padding.
+        inner = width - 4
         self.query_one("#note", Static).update(self._note_text())
-        self.query_one("#kpi", Static).update(self._kpi_text(width))
-        self.query_one("#chart", Static).update(self._chart_text(width, chart_h))
+        self.query_one("#kpi", Static).update(self._kpi_text(inner))
+        self.query_one("#chart", Static).update(self._chart_text(inner, chart_h))
         self._paint_tops(rows, width)
 
     def _kpi_text(self, width: int = 120) -> Text:
         k = self._kpis
         total = k.tokens or 0
-        out = Text()
+        out = Text("Window\n", style="bold")
         out.append(fmt_tokens(total), style="bold")
         out.append(" tokens   ")
         out.append_text(_delta(k.tokens, k.prev_tokens))
@@ -727,7 +733,7 @@ class DashboardPane(Pane):
         return out
 
     def _paint_tops(self, rows: int, width: int) -> None:
-        half = max(30, (width - 2) // 2)
+        half = max(30, (width - 1) // 2 - 4)
         name_w = max(10, half - 22)
 
         total = sum(m.total for m in self._models)
