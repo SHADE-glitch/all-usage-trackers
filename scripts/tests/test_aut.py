@@ -8,6 +8,7 @@ is where the numbers come from.
 
 from __future__ import annotations
 
+import io
 import os
 import sqlite3
 import sys
@@ -196,6 +197,18 @@ class TestReadOnly(unittest.TestCase):
                     ro.execute("INSERT INTO t VALUES (1)")
             finally:
                 ro.close()
+
+
+class TestSyncCommand(unittest.TestCase):
+    def test_a_missing_tracker_is_reported_not_traced_back(self):
+        import aut_report
+
+        with mock.patch.dict(os.environ, {"PATH": ""}), \
+                mock.patch("sys.stdout", new_callable=io.StringIO), \
+                mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            code = aut_report.main(["sync", "cbut"])
+        self.assertEqual(code, 1)
+        self.assertIn("not on PATH", err.getvalue())
 
 
 class TestFormatting(unittest.TestCase):

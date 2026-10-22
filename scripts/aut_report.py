@@ -59,7 +59,15 @@ def cmd_sync(args: argparse.Namespace) -> int:
             failed += 1
             continue
         print(f"aut: syncing {source.label}", flush=True)
-        code = subprocess.call(source.sync_argv())
+        try:
+            code = subprocess.call(source.sync_argv())
+        except FileNotFoundError:
+            # A tracker that is not installed is a normal state on a machine that
+            # only uses one of them — report it, do not traceback.
+            print(f"aut: {source.binary} is not on PATH — install that tracker first",
+                  file=sys.stderr)
+            failed += 1
+            continue
         if code != 0:
             failed += 1
     return 1 if failed else 0

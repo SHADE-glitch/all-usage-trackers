@@ -20,6 +20,10 @@ Textual, or in a schema can invalidate.
 
 ### Fixed
 
+- **`aut sync` reports a missing tracker instead of raising.** On a machine that
+  has only one of the three installed, `aut sync` used to end in a
+  `FileNotFoundError` traceback; it now names the missing binary, moves on to the
+  next source, and exits 1.
 - **`install.sh` refuses before it builds anything.** The symlink guard used to run
   after the venv step, so a refused install still left a venv behind and read like
   a half-success. The guard now runs first, and the symlink step is a single
