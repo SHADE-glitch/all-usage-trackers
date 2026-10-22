@@ -728,6 +728,13 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pane.max_scroll_y, 0, "a tall pane still scrolls")
             self.assertEqual(models.region.bottom, pane.region.bottom,
                              "the cards stopped short of the pane's bottom")
+            # A taller terminal gives the cards more to fill, and the pane is
+            # what notices: it re-fits on its own resize.
+            await pilot.resize_terminal(160, 60)
+            await pilot.pause()
+            self.assertEqual(pane.max_scroll_y, 0)
+            self.assertEqual(models.region.bottom, pane.region.bottom,
+                             "growing the terminal left the cards behind")
 
         app = AutApp()
         async with app.run_test(size=(120, 20)) as pilot:
