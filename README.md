@@ -23,40 +23,41 @@
 
 | Tab | What it shows |
 | :--- | :--- |
-| **Dashboard** | the window's usage total, sessions and calls, the change against the previous window of the same length, top models and top skills as two cards that grow with their rows (the pane scrolls), and the window caption |
+| **Dashboard** | the window's usage total, sessions and calls, the change against the previous window of the same length, top models and top skills as two cards that grow with their rows (the pane scrolls), and the window caption. A model row carries its origin — which tracker(s) the merged number came from |
 | **Tools** | one row per tool, with the calls each tracker made, ok / fail, average duration and last use |
 | **Skills** | the same shape for skills — the one place a skill's use in CodeBuddy and OpenCode sits on one line |
-| **Tokens** | **one row per model**, merged across trackers by name, with a column per tracker; `g` cycles to model × tracker, then one row per tracker |
+| **Tokens** | **one row per model**, merged across trackers by name, with a column per tracker; `g` cycles to model × tracker (the usage total first, then the input / output / cache split it is made of), then one row per tracker |
 | **Usage** | the most recent calls from all three in one timeline; identical calls within a minute share a row (`×26`), so the list shows turns rather than rows |
 | **Sources** | each tracker's health, share of the window's tokens, index size and 7-day trend; `enter` opens that tracker's own TUI |
 
 ```text
- aut · all usage trackers                                       📅 Custom…   Today ▾
+ aut · all usage trackers                                                           📅 Custom…   Today                ▼
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 5 models · 0 skills in this window · last call 8m ago
- ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
- │ Window                                                                                         │
- │ 144.19M tokens   ↑330% vs 33.51M   ·   122 sessions · 5,377 calls · 1 active day               │
- │ CodeBuddy 50.73M 35%   OpenCode 12.29M  9%   Qoder CN 81.17M 56%                               │
- ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
- ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
- │ tokens per hour  ·  Today  ·  peak 50.46M at 11                                                │
- │ 50.5M ┤           █                                                                            │
- │       │           █ █                                                                          │
- │ 25.2M ┤           █ █                                                                          │
- │       │          ████                                                                          │
- │     0 ┤█         █████                                                                         │
- │       └───────────────                                                                         │
- │          02 05 08 11 14                                                                        │
- ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
- ╭──────────────────────────────────────────────╮ ╭───────────────────────────────────────────────╮
- │ top models · 144.19M                         │ │ top skills · 0 calls                          │
- │  dfmodel                 81.17M ██████ 56%   │ │   none in this window · d widens it           │
- │  deepseek-v4.1-flash     50.70M ████░░ 35%   │ │                                               │
- │  minimax-m3.1-flash-fre  11.99M █░░░░░  8%   │ │ recent calls                                  │
- │  deepseek-v4.1-flash-fr    301K █░░░░░  0%   │ │    8m ago  CodeBuddy  deepseek-v    198K      │
- ╰──────────────────────────────────────────────╯ ╰───────────────────────────────────────────────╯
- 3 of 3 indexes · 87.2 MB · synced 0s ago
+╸━━━━━━━━━╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 8 models · 0 skills in this window · last call 5m ago
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+ │ Window                                                                                                             │
+ │ 2567.24M usage total   ↑134% vs 1098.76M   ·   271 sessions · 16,298 calls · 1 active day                          │
+ │ CodeBuddy █░░░░░░░ 311.22M 12%   OpenCode █████░░░ 1599.99M 62%   Qoder CN ██░░░░░░ 656.02M 26%                    │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ╭────────────────────────────────────────────────────────╮ ╭─────────────────────────────────────────────────────────╮
+ │ top models · 2567.24M                                  │ │ top skills · 0 calls                                    │
+ │  minimax-m3.1-flash-fr… ocut      1587.95M ██████ 62%  │ │   none in this window · d widens it                     │
+ │  dfmodel                qcut      638.21M ██░░░░ 25%   │ │                                                         │
+ │  deepseek-v4.1-flash    cbut      239.65M █░░░░░  9%   │ ╰─────────────────────────────────────────────────────────╯
+ │  glm-5.3-flash          cbut       46.33M █░░░░░  2%   │
+ │  deepseek-v4-1-flash    cbut       25.25M █░░░░░  1%   │
+ │  qfmodel                qcut       17.81M █░░░░░  1%   │
+ │  deepseek-v4.1-flash-f… ocut        7.08M █░░░░░  0%   │
+ │  flint-40b-free         ocut        4.96M █░░░░░  0%   │
+ │                                                        │
+ │ by tracker · tokens / call                             │
+ │  CodeBuddy    311.22M  1,030 calls  302K/call          │
+ │  OpenCode     1599.99M  11,008 calls  145K/call        │
+ │  Qoder CN     656.02M  4,260 calls  154K/call          │
+ │                                                        │
+ ╰────────────────────────────────────────────────────────╯
+ 3 of 3 indexes · 94.5 MB · synced 0s ago
  tab Next tab  shift+tab Prev tab  q Quit  r Sync now  d Date  ? Help
 ```
 
@@ -68,7 +69,7 @@ The shared keys are the tracker family's, so a habit learned in `cbut` works her
 | :--- | :--- |
 | `tab` / `shift+tab` | next / previous tab |
 | `1`–`6` | jump to a tab directly |
-| `s` | cycle the sort order — the caption above the table names it (`sort: total ▼ (s)`) |
+| `s` | cycle the sort order — the caption above the table names it (`sort: usage total ▼ (s)`) |
 | `/` | filter rows ( `esc` clears) |
 | `d` | date range — presets or the custom calendar picker |
 | `enter` | open the selected row's detail (the table tabs; on Sources it hands the terminal to that tracker) |

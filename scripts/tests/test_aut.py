@@ -495,6 +495,41 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(pane.mode, "source")
             self.assertNotIn("provider", pane._visible)
 
+    async def test_a_model_row_names_the_trackers_it_came_from(self):
+        from textual.widgets import Static
+
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            pane = app.pane()
+            # A merged row is a sum of tools; the card has to say which ones.
+            pane._models = [
+                model.ModelTotal("gpt-5", total=900, requests=3,
+                                 per_source={"cbut": 600, "ocut": 300}),
+                model.ModelTotal("claude-x", total=100, requests=1,
+                                 per_source={"qcut": 100}),
+            ]
+            pane._paint()
+            await pilot.pause()
+            card = app.query_one("#top-models", Static)
+            text = str(card.render())
+            self.assertIn("cbut+ocut", text)
+            self.assertIn("claude-x", text)
+            self.assertIn("qcut", text)
+            # And the tag is paid for out of the name field, not out of the card:
+            # card.size is already the content box, borders and padding excluded.
+            for line in text.splitlines():
+                self.assertLessEqual(len(line), card.size.width, line)
+
+    def test_usage_total_sits_ahead_of_the_input_split(self):
+        from aut_app import TokensPane
+
+        for mode, cols in TokensPane.COLUMN_SETS.items():
+            if "input" in cols:
+                self.assertLess(cols.index("usage total"), cols.index("input"), mode)
+        self.assertEqual(TokensPane.COLUMN_SETS["model"][1], "usage total")
+
     async def test_the_dashboard_draws_its_panels_as_cards(self):
         from textual.widgets import Static
 

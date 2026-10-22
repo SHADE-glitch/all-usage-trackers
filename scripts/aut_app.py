@@ -57,6 +57,22 @@ SYNC_TIMEOUT_S = 300
 # colour match, not a word match.
 SOURCE_STYLE = {"cbut": "cyan", "ocut": "yellow", "qcut": "magenta"}
 
+
+def origin_label(per_source: dict[str, int]) -> str:
+    """Which trackers put a row on the board, as one short tag.
+
+    A merged row is the sum of several tools, so the number alone does not say
+    where it came from. Kept to nine columns ("cbut+ocut") because it sits in a
+    card beside the model name.
+    """
+    keys = [s.key for s in SOURCES if per_source.get(s.key)]
+    if not keys:
+        return "—"
+    if len(keys) == len(SOURCES):
+        return "all"
+    return "+".join(keys)
+
+
 HELP = """
   tab / shift+tab  next / previous tab    1 - 6  jump to a tab
   s                cycle the sort order   /      filter rows
@@ -396,8 +412,10 @@ class TokensPane(TablePane):
     COLUMN_SETS = {
         "model": ("model", "usage total", "cbut", "ocut", "qcut", "req",
                   "last used"),
-        "calls": ("source", "model", "provider", "input", "output", "cache r",
-                  "cache w", "usage total", "req", "last used"),
+        # The total comes before the split it is made of: it is the number the
+        # row is ranked by, and the four parts explain it rather than lead it.
+        "calls": ("source", "model", "provider", "usage total", "input", "output",
+                  "cache r", "cache w", "req", "last used"),
         "source": ("source", "usage total", "input", "output", "cache r",
                    "cache w", "req", "last used"),
     }
@@ -601,8 +619,9 @@ class DashboardPane(Pane):
 
     One window, three cards: the KPI strip, then the models and the skills that
     account for it, each ranked with its share so the reader does not have to
-    divide two numbers. Every token on this screen is the Usage Total — the same
-    number the Tokens and Usage tabs rank by.
+    divide two numbers. A model row also carries its origin — which tracker(s)
+    the merged number came from. Every token on this screen is the Usage Total,
+    the same number the Tokens and Usage tabs rank by.
     """
 
     TAB_KEY = "dashboard"
@@ -715,7 +734,8 @@ class DashboardPane(Pane):
 
     def _paint_tops(self, width: int) -> None:
         half = max(30, (width - 1) // 2 - 4)
-        name_w = max(10, half - 22)
+        # The origin tag costs nine columns; the model name is what yields them.
+        name_w = max(10, half - 32)
 
         total = sum(m.total for m in self._models)
         models = Text()
@@ -723,8 +743,13 @@ class DashboardPane(Pane):
         if not self._models:
             models.append("  nothing in this window", style="dim")
         for item in self._models:
+            origin = origin_label(item.per_source)
+            name = item.model
+            if len(name) > name_w:
+                name = name[: name_w - 1] + "…"
             line = Text()
-            line.append(f" {item.model[:name_w]:<{name_w}}")
+            line.append(f" {name:<{name_w}}")
+            line.append(f" {origin:<9}", style=SOURCE_STYLE.get(origin, "dim"))
             line.append(f" {fmt_tokens(item.total):>7} ")
             line.append_text(share_bar(item.total, self._models[0].total, width=6,
                                        style=self._model_style(item)))
@@ -743,7 +768,13 @@ class DashboardPane(Pane):
                 per_call = f"{fmt_tokens(round(tokens / calls))}/call" if calls else "—"
                 line = Text()
                 line.append(f" {source.label:<12}", style=SOURCE_STYLE.get(source.key, ""))
-                line.append(f" {fmt_tokens(tokens):>7}  {calls:>5,} calls  {per_call:>9}\n")
+                if half >= 45:
+                    line.append(f" {fmt_tokens(tokens):>7}  {calls:>5,} calls  {per_call:>9}\n")
+                else:
+                    # Narrower than the full line: the per-call figure is what
+                    # this block is for, so the call count is what goes. It is
+                    # already in the KPI strip above.
+                    line.append(f" {fmt_tokens(tokens):>7}  {per_call:>9}\n")
                 models.append_text(line)
         self.query_one("#top-models", Static).update(models)
 

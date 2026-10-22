@@ -21,6 +21,10 @@ One token number everywhere, and a dashboard that fits its content.
 - **Token columns are named for what they are.** `total` reads `usage total`
   on Tokens, Usage, Sources and the dashboard KPI strip, so a number that says
   neither input, output nor cache is always the Usage Total.
+- **The usage total leads the split on Tokens.** In the model × tracker view it
+  used to sit after input / output / cache r / cache w, which read as a sum
+  arriving after its parts. It is the column the table is sorted by, so it now
+  comes first; the four parts follow it.
 
 ### Removed
 
@@ -37,6 +41,15 @@ One token number everywhere, and a dashboard that fits its content.
   grow with their rows (`height: auto`) inside a pane that scrolls
   (`overflow-y: auto`) once the screen is full. A list that outgrew its fixed
   row count used to be silently truncated; now nothing is cut.
+- **A top-model row names its origin.** A model's total is a sum over the
+  trackers that used it, and on a merged board that is exactly what the number
+  cannot tell you, so each row carries a tag beside the name (`cbut`, `ocut`,
+  `qcut`, `cbut+ocut`, `all`). The tag is nine columns and the model name gives
+  them up, with an ellipsis once the name no longer fits — the row still fits
+  the card at every width the two-column layout is used at.
+- The per-call block under the model list drops its call count below 45 columns
+  of card width instead of wrapping: the per-call figure is what the block is
+  for, and the count is already in the KPI strip above.
 
 ## 0.4.0
 

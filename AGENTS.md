@@ -17,9 +17,9 @@ A **read-only** six-tab board over the local usage trackers: `cbut` (CodeBuddy),
 2. `scripts/aut_model.py` — the cross-tool aggregation every tab draws. Pure:
    `(start_ms, end_ms) -> rows`, no Textual import, so the numbers are testable
    without a terminal.
-3. `scripts/aut_chart.py` — text charts: `stacked_chart`, `share_bar`, `pct`.
-   Pure numbers in, `rich.Text` out, no Textual, so the drawing is testable
-   glyph by glyph. A chart is the easiest place here to lie by accident.
+3. `scripts/aut_chart.py` — text-only bars: `share_bar`, `pct`. Pure numbers
+   in, `rich.Text` out, no Textual, so the drawing is testable glyph by glyph.
+   A proportion is the easiest place here to lie by accident.
 4. `scripts/aut_picker.py` — the custom date-range picker, ported verbatim from
    the tracker family (same 79x30 layout, same chips). Kept in its own file so
    the board stays about the board.
@@ -55,6 +55,11 @@ This repository is public.
 - **One bar, one scale.** Every bar in a table shares its scale; a bar scaled to
   its own row would draw a 12M and an 81M source at the same height, which is a
   lie the eye cannot catch. The percentage beside it is its share of the window.
+- **A merged row names its sources.** A number that sums several trackers says
+  which ones — `cbut+ocut`, `all` — because the total alone cannot be traced
+  back to a tool. The tag sits beside the name and is paid for out of the name
+  field, never out of the card: a line that wraps loses the alignment the list
+  is for.
 - **Cards grow, then the pane scrolls.** A list card takes the height its rows
   need — never a fixed row count that silently hides the rest — and the pane
   scrolls once the screen is full.
@@ -63,8 +68,11 @@ This repository is public.
 - **Keep the keys aligned with the family.** `r` syncs, `s` sorts, `/` filters,
   `d` opens the range picker, `tab` cycles. A different meaning for a shared key
   is a bug, not a preference.
+- **The total comes before its parts.** Where a row shows the usage total and
+  the input / output / cache split, the total is the leading column: it is the
+  number the row is ranked and sorted by, and the four parts explain it.
 - **State above the table, provenance below, keys in the footer.** The caption
-  names the sort and the grouping (`sort: total ▼ (s)`); the line under the table
+  names the sort and the grouping (`sort: usage total ▼ (s)`); the line under the table
   says how many indexes were read, how big they are and when they were synced.
   This is the three trackers' layout, and the reason `s` is discoverable at all.
 - **The footer only lists keys that work on the tab.** `AutApp.check_action` is
@@ -96,7 +104,7 @@ scripts/aut_sources.py  the adapters (SOURCES) and the Snapshot shape
 scripts/aut_model.py    cross-tool aggregation: tokens, entities, timeline, kpis
 scripts/aut_picker.py   the custom date-range picker (ported from the family)
 scripts/aut_app.py      the Textual board: six panes + two detail screens
-scripts/aut_chart.py    the one stacked chart and the share bar, shared by every pane
+scripts/aut_chart.py    the share bar and its percentage, shared by every pane
 scripts/aut_db.py       read-only connections, formatting, sparkline
 scripts/aut_report.py   headless json / sync
 scripts/tests/          adapters + aggregation against temp databases, board smoke tests
