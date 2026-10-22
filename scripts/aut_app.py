@@ -1148,7 +1148,9 @@ class AutApp(App[None]):
     ENABLE_COMMAND_PALETTE = False
 
     CSS = """
-    Screen { background: $surface; }
+    /* The screen keeps the theme's default background, as in the three
+       trackers: $surface is rgb(30,30,30) against the theme's rgb(18,18,18),
+       and a whole-screen $surface made aut the lighter one of the family. */
     #bar { dock: top; height: 1; background: $panel; color: $foreground; }
     #bar #title { width: 1fr; padding: 0 1; content-align: left middle; }
     #bar #custom { width: auto; min-width: 0; height: 1; border: none;

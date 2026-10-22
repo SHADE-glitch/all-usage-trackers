@@ -80,6 +80,12 @@ One token number everywhere, and a dashboard that fits its content.
 - **The KPI line drops whole facts instead of wrapping them,** and the Tokens
   caption uses the short grouping label below 100 columns. Both were 2-20 cells
   too wide at 80.
+- **The screen keeps the theme's default background.** A whole-screen
+  `background: $surface` painted aut with `rgb(30,30,30)` while the three
+  trackers render on the `textual-dark` default `rgb(18,18,18)` — the family's
+  one app that looked lighter. The override is gone; the top bar, cards, filter
+  and help box keep the same `$panel` / `$boost` / `$accent` tokens the trackers
+  use, so the palettes now match to the cell.
 
 ### Tests
 
