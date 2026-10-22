@@ -626,10 +626,17 @@ class DashboardPane(Pane):
 
     # -- drawing ------------------------------------------------------------
 
+    def on_resize(self, event) -> None:
+        # A pane is measured after it is first composed, so the first paint can
+        # happen at width 0 and leave a chart sized for 80 columns on a 130
+        # column terminal. Repaint when the real size arrives.
+        if self.is_mounted:
+            self._paint()
+
     def _layout(self) -> tuple[int, int, int]:
         """(width, chart height, rows left for the lists) for the current size."""
-        width = max(40, self.size.width or 80)
-        height = self.size.height or 30
+        width = max(40, self.size.width or (self.app.size.width - 2) or 80)
+        height = self.size.height or (self.app.size.height - 4) or 30
         # The chart takes what is left after the KPI strip and the ranked lists,
         # within bounds: fewer than 4 bar rows is a line, more than 9 is a waste.
         chart_h = max(4, min(9, height - 13))
