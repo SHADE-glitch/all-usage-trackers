@@ -17,11 +17,14 @@ A **read-only** six-tab board over the local usage trackers: `cbut` (CodeBuddy),
 2. `scripts/aut_model.py` — the cross-tool aggregation every tab draws. Pure:
    `(start_ms, end_ms) -> rows`, no Textual import, so the numbers are testable
    without a terminal.
-3. `scripts/aut_picker.py` — the custom date-range picker, ported verbatim from
+3. `scripts/aut_chart.py` — text charts: `stacked_chart`, `share_bar`, `pct`.
+   Pure numbers in, `rich.Text` out, no Textual, so the drawing is testable
+   glyph by glyph. A chart is the easiest place here to lie by accident.
+4. `scripts/aut_picker.py` — the custom date-range picker, ported verbatim from
    the tracker family (same 79x30 layout, same chips). Kept in its own file so
    the board stays about the board.
-4. `scripts/aut_app.py` — the Textual board: top bar, six panes, detail screens.
-5. `scripts/aut_report.py` — `aut json` and `aut sync`.
+5. `scripts/aut_app.py` — the Textual board: top bar, six panes, detail screens.
+6. `scripts/aut_report.py` — `aut json` and `aut sync`.
 
 `bin/aut` is a bash dispatcher. **It is bash on purpose**: it must still run and
 print a useful error when the venv is missing or broken.
@@ -41,7 +44,14 @@ This repository is public.
   credits and dollars; a single cost column would merge three units.
 - **Do not merge what is not the same thing.** Tool names merge on case alone
   (`Read` / `read`). `Bash` and `shell` stay apart, and `pending` is never folded
-  into `fail` — those are guesses, not facts.
+  into `fail` — those are guesses, not facts. Models *do* merge by name across
+  trackers (that is the point of the Tokens tab); provider is a column, not a
+  split.
+- **One chart, one scale.** Every series in a chart shares a y axis. Two
+  sparklines normalised to their own maximum draw a 12M and an 81M source at the
+  same height, which is a lie the eye cannot catch.
+- **The window is the chart.** A one-day window draws hours. Do not borrow days
+  from outside the window to make a chart look fuller.
 - **Keep the three TUIs untouched.** Going deeper is `suspend()` + the tracker's
   own binary, never a re-implementation of its views.
 - **Keep the keys aligned with the family.** `r` syncs, `s` sorts, `/` filters,

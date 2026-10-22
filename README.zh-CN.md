@@ -23,28 +23,36 @@
 
 | Tab | 显示什么 |
 | :--- | :--- |
-| **Dashboard** | 当前窗口的 token、会话、调用、活跃天数，以及与上一个等长窗口的变化；按源的每日 token；模型与 skill 排行 |
+| **Dashboard** | 当前窗口的 token、会话、调用，与上一个等长窗口的变化，窗口本身的分源堆叠图（一天按小时、更长按天），模型与 skill 排行，每家的「每次调用消耗」，以及最近调用 |
 | **Tools** | 一行一个工具，三家各自的调用数、ok / fail、平均耗时、最后使用 |
 | **Skills** | 同样形状，一行一个 skill —— 同一个 skill 在 CodeBuddy 和 OpenCode 的使用第一次并排在一行 |
-| **Tokens** | 一行一个模型：input、output、cache read、cache write、total、请求数；`g` 折成一行一个来源 |
-| **Usage** | 三家最近的调用合并成一条时间线 |
-| **Sources** | 每家的健康度、索引大小、7 天趋势；`enter` 进入那家的 TUI |
+| **Tokens** | **一行一个模型**，按模型名跨三家合并，每家一列；`g` 依次切到「模型 × 来源」和「一行一个来源」 |
+| **Usage** | 三家最近的调用合并成一条时间线；同一分钟内完全相同的调用合并成一行（`×26`），看到的是轮次而不是刷屏 |
+| **Sources** | 每家的健康度、占本窗口 token 的比例、索引大小、7 天趋势；`enter` 进入那家的 TUI |
 
 ```text
- aut · all usage trackers                                        📅 Custom…   7 days ▾
+ aut · all usage trackers                                       📅 Custom…   Today ▾
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 96.38M tokens   ↑380%   93 sessions   3,641 calls   1 active day
- CodeBuddy 6.80M   OpenCode 8.41M   Qoder CN 81.17M
+ 135.74M tokens   ↑305% vs 33.51M   ·   122 sessions · 5,329 calls · 1 active day
+ CodeBuddy 42.28M 31%   OpenCode 12.29M  9%   Qoder CN 81.17M 60%
 
- tokens per day · 7d · context
-   CodeBuddy ▅▅▅▆█▇▂  790.38M
-   OpenCode  ▇▅▂▂▂█▂  184.13M
-   Qoder CN  ▁▁▁▁▁█▃  357.03M
-   all        ▃▃▃▃▄█▃  1331.53M
-
-  top models                       top skills
-    dfmodel            81.17M      code-review   18 calls  cbut 12 / ocut 6
-    minimax-m3.1-free   8.11M      tdd            9 calls  cbut 9
+ tokens per hour  ·  Today  ·  peak 50.46M at 11
+ 50.5M ┤           █
+       │           █
+       │           █ █
+ 25.2M ┤           █ █
+       │          ████
+       │          ████
+     0 ┤█         ████
+       └──────────────
+         01 04 07 10 13
+  top models · 135.74M                             top skills · 0 calls
+   dfmodel                     81.17M ██████ 60%     none in this window · d widens it
+   deepseek-v4.1-flash         42.24M ███░░░ 31%
+   minimax-m3.1-flash-free     11.99M █░░░░░  9%   recent calls
+   deepseek-v4.1-flash-free      301K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
+   glm-5.3-flash                  38K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
+                                                      2m ago  CodeBuddy  deepseek-v4.1-flash  148K
 ```
 
 ## 按键
@@ -55,11 +63,12 @@
 | :--- | :--- |
 | `tab` / `shift+tab` | 下一个 / 上一个 tab |
 | `1`–`6` | 直接跳到某个 tab |
-| `s` | 循环排序 |
+| `s` | 循环排序 —— 当前排序列的表头带 `▼` |
 | `/` | 过滤行（`esc` 清除） |
 | `d` | 时间范围 —— 预设或完整日历选择器 |
-| `enter` | 打开选中行的详情 |
-| `g` | Tokens：按模型 ↔ 按来源 切换分组 |
+| `enter` | 打开选中行的详情；在 Dashboard 上则打开选中模型的 Tokens |
+| `↑` `↓` | 仅 Dashboard：挑选模型 |
+| `g` | Tokens：按模型 → 模型 × 来源 → 按来源 |
 | `r` | 立即同步三家（跑它们自己的 `sync`） |
 | `?` `q` | 帮助 / 退出 |
 
@@ -70,7 +79,11 @@
 - **以 token 为单位。** 不显示 credit、不显示金额：三家分别报 credit、credit、美元，合成一列等于把三种单位假装成一种。
 - **缺索引不等于零。** 没装、没同步、schema 过旧的源在合并里直接跳过，并在 Sources tab 里报出来 —— 绝不记成"用了 0"。
 - **ok / fail / pending** 来自三家真实写入的状态：`completed` 是 ok；`error`、`incomplete`、`cancelled` 是失败；`running`、`backgrounded` 和没有状态都算 pending，pending 不是失败。
+- **一个模型就是一行。** 同一个模型名在三家用了，就是一个总数加三列 —— "这个模型花了我多少"只有一个答案。名字按大小写不敏感合并；想看每家分开时按 `g`。
 - **工具名按大小写不敏感合并**（一家叫 `Read`、一家叫 `read`，合成一行）。`Bash` 和 `shell` 保持分开：它们是不是同一个工具，这个应用不做这种猜测。
+- **一张图一根标尺。** 同一张图里的每条序列共用一个纵轴，12M 的源和 81M 的源不会画出一样高的柱子。柱子旁边的百分比是它占本窗口的比例，柱子本身按最大的那一行缩放。
+- **选什么窗口就画什么。** `今天` 画今天的小时，`7d` 画七天 —— 不会在"今天"里偷偷塞一周。
+- **同一屏上的两个数字数的是同一批调用。** Sources 的窗口取自当前 tab，而不是"最近 N×24 小时"，所以它和上方的 KPI 对得上。
 - **没有 `a` 键。** 三家用它表示"装了但没用过"，这在跨工具语境里没有对应含义。
 
 ## 它不做什么

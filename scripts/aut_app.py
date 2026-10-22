@@ -28,7 +28,8 @@ from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, DataTable, Input, Select, Static, TabbedContent, TabPane
 
 import aut_model as model
-from aut_db import fmt_age, fmt_tokens, sparkline
+from aut_chart import pct, share_bar, stacked_chart
+from aut_db import DAY_MS, fmt_age, fmt_tokens, sparkline
 from aut_picker import (CustomWindow, DateRangeModal, RANGE_LABELS, bounds_of,
                         window_label)
 from aut_sources import BY_KEY, SOURCES, snapshots
@@ -55,21 +56,57 @@ HELP = """
   s                 cycle the sort order        /       filter rows
   d                 date range                  esc     clear the filter
   enter             open the selected row's detail
-  g                 Tokens only: group by model or by source
+  g                 Tokens: by model / model×tracker / tracker
   r                 sync the three trackers now (runs their own sync)
   ?                 this help                  q       quit
 
-  Sources tab: enter opens that tracker's own TUI; q there returns here.
+  The sorted column carries a ▼ in its header and is named in the status line,
+  so s never has to be pressed to find out what it did.
+  Dashboard: up/down picks a model; enter opens Tokens filtered by it.
+  Sources: enter opens that tracker's own TUI; q there returns to aut.
   There is no 'a' key: the trackers use it for "installed but never used",
   which has no cross-tool equivalent here.
 """
 
-HINT = "tab switch · s sort · / filter · d date · enter detail · g group · r sync · ? help · q quit"
+HINT = "tab switch · s sort ▼ · / filter · d date · enter detail · g group · r sync · ? help · q quit"
 
 
-def _shorten(path: str) -> str:
+def _project(path: str, width: int = 36) -> Text:
+    """A project path as one table cell.
+
+    Most OpenCode sessions run from $HOME itself, so a column of identical "~"
+    says nothing. The path is shown relative to home, and a bare home is dimmed
+    so it reads as "no project" rather than as a name.
+    """
+    if not path:
+        return Text("—", style="dim")
     home = str(Path.home())
-    return "~" + path[len(home):] if path.startswith(home) else path
+    if path == home:
+        return Text("~", style="dim")
+    shown = "~" + path[len(home):] if path.startswith(home + "/") else path
+    if len(shown) > width:
+        head = shown[: max(1, width // 3)]
+        shown = head + "…" + shown[-(width - len(head) - 1):]
+    return Text(shown)
+
+
+def _share_cell(value: int, total: int, key: str) -> Text:
+    """A proportion bar plus its percentage, as one table cell."""
+    out = share_bar(value, total, width=6, style=SOURCE_STYLE.get(key, "cyan"))
+    out.append(f" {pct(value, total):>3}")
+    return out
+
+
+def _source_split(per: dict[str, int], total: int) -> Text:
+    """One line naming each tracker's share of a merged total."""
+    out = Text()
+    for key, value in sorted(per.items(), key=lambda kv: kv[1], reverse=True):
+        label = BY_KEY[key].label if key in BY_KEY else key
+        if out:
+            out.append("   ")
+        out.append(f"{label} ", style=SOURCE_STYLE.get(key, ""))
+        out.append(f"{fmt_tokens(value)} {pct(value, total)}", style="dim")
+    return out
 
 
 def _human_size(size: int) -> str:
@@ -83,6 +120,8 @@ def _human_size(size: int) -> str:
 def _avg(ms: float | None) -> str:
     if ms is None:
         return "—"
+    if ms >= 60_000:
+        return f"{ms / 60_000:.1f}m"
     if ms >= 1000:
         return f"{ms / 1000:.1f}s"
     return f"{ms:.0f}ms"
@@ -94,10 +133,10 @@ def _delta(now: int, prev: int | None) -> Text:
         return Text("—", style="dim")
     if prev <= 0:
         return Text("new", style="green")
-    pct = (now - prev) / prev * 100
-    arrow = "↑" if pct >= 0 else "↓"
-    style = "red" if pct >= 0 else "green"   # more tokens is not "good"
-    return Text(f"{arrow}{abs(pct):.0f}%", style=style)
+    change = (now - prev) / prev * 100
+    arrow = "↑" if change >= 0 else "↓"
+    style = "red" if change >= 0 else "green"   # more tokens is not "good"
+    return Text(f"{arrow}{abs(change):.0f}%", style=style)
 
 
 class HelpScreen(ModalScreen[None]):
@@ -143,13 +182,22 @@ class TablePane(Pane):
     """A table, a filter, a sort order — the shape five of the six tabs share."""
 
     COLUMNS: tuple[str, ...] = ()
-    COLUMN_WIDTHS: tuple[int | None, ...] = ()
-    SORT_FIELDS: tuple[tuple[str, str], ...] = ()   # (label, attribute)
+    # Widths by name, so a column can be dropped on a narrow terminal without
+    # every other width shifting by one.
+    COLUMN_WIDTHS: dict[str, int] = {}
+    # (label, attribute, column). The column is what the header marks with a
+    # marker, so the reader can see what s is sorting by without pressing it.
+    SORT_FIELDS: tuple[tuple[str, str, str], ...] = ()
 
     DEFAULT_CSS = """
     TablePane { height: 1fr; }
-    TablePane #filter { display: none; height: 1; margin: 0 1; }
+    /* A one-row Input keeps its border and draws it as ▔/▁ over the text, so
+       the border is removed rather than the row made taller: the filter is a
+       strip above the table, not a form field. */
+    TablePane #filter { display: none; height: 1; margin: 0 1; border: none;
+                        background: $boost; }
     TablePane #filter.-on { display: block; }
+    TablePane #filter:focus { background: $accent 20%; }
     TablePane #note { height: 1; padding: 0 1; color: $text-muted; }
     TablePane DataTable { height: 1fr; }
     """
@@ -160,6 +208,7 @@ class TablePane(Pane):
         self.needle = ""
         self.sort_index = 0
         self._rows: list = []
+        self._visible: tuple[str, ...] = ()
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder="filter…", id="filter")
@@ -167,22 +216,48 @@ class TablePane(Pane):
         yield Static("", id="note")
 
     def on_mount(self) -> None:
+        self._paint_columns(self.app.size.width)
+
+    def on_resize(self, event) -> None:
+        # Crossing a width threshold re-lays the columns; a resize inside one
+        # band costs nothing, so dragging a window edge does not re-query.
+        if self._paint_columns(event.size.width):
+            self.reload(self.window)
+
+    def columns_for(self, width: int) -> tuple[str, ...]:
+        """Which columns fit. A narrow terminal drops detail, never rows."""
+        return self.COLUMNS
+
+    def _paint_columns(self, width: int, force: bool = False) -> bool:
+        cols = self.columns_for(width)
+        if cols == self._visible and not force:
+            return False
+        self._visible = cols
+        marker = self.sort_column()
         table = self.query_one(DataTable)
-        if self.COLUMN_WIDTHS:
-            for name, width in zip(self.COLUMNS, self.COLUMN_WIDTHS):
-                table.add_column(name, width=width)
-        else:
-            table.add_columns(*self.COLUMNS)
+        table.clear(columns=True)
+        for name in cols:
+            width = self.COLUMN_WIDTHS.get(name)
+            marked = bool(name) and name == marker
+            # The marker needs two cells of its own or it is what gets clipped.
+            table.add_column(f"{name} ▼" if marked else name,
+                             width=width + 2 if (marked and width) else width,
+                             key=name)
+        return True
 
     # subclasses implement these three
     def fetch(self, window) -> list:
         raise NotImplementedError
 
-    def cells(self, row) -> tuple:
+    def cells(self, row) -> dict[str, object]:
         raise NotImplementedError
 
+    def _before_render(self, rows: list) -> None:
+        """Hook for a pane that needs a column total before drawing its rows."""
+
     def matches(self, row, needle: str) -> bool:
-        return needle in " ".join(str(c) for c in self.cells(row)).lower()
+        values = self.cells(row).values()
+        return needle in " ".join(str(v) for v in values).lower()
 
     def note(self, window, rows: list) -> str:
         return ""
@@ -192,8 +267,15 @@ class TablePane(Pane):
             return None
         return self.SORT_FIELDS[self.sort_index][1]
 
+    def sort_column(self) -> str:
+        if not self.SORT_FIELDS:
+            return ""
+        return self.SORT_FIELDS[self.sort_index][2]
+
     def reload(self, window) -> None:
         self.window = window
+        if not self._visible:
+            self._paint_columns(self.app.size.width)
         rows = self.fetch(window)
         if self.needle:
             rows = [r for r in rows if self.matches(r, self.needle)]
@@ -201,12 +283,14 @@ class TablePane(Pane):
         if key:
             rows.sort(key=lambda r: (getattr(r, key) is None, getattr(r, key)), reverse=True)
         self._rows = rows
+        self._before_render(rows)
 
         table = self.query_one(DataTable)
         cursor = max(0, table.cursor_row)
         table.clear(columns=False)
         for row in rows:
-            table.add_row(*self.cells(row))
+            cells = self.cells(row)
+            table.add_row(*[cells.get(name, "") for name in self._visible])
         if rows:
             table.move_cursor(row=min(cursor, len(rows) - 1))
         self.query_one("#note", Static).update(self.note(window, rows))
@@ -215,6 +299,9 @@ class TablePane(Pane):
         if not self.SORT_FIELDS:
             return
         self.sort_index = (self.sort_index + 1) % len(self.SORT_FIELDS)
+        # The header carries the marker, so the columns are repainted on every
+        # change even though the visible set is the same.
+        self._paint_columns(self.app.size.width, force=True)
         self.reload(self.window)
 
     def action_open_filter(self) -> None:
@@ -247,137 +334,260 @@ class TablePane(Pane):
         index = table.cursor_row
         return self._rows[index] if 0 <= index < len(self._rows) else None
 
-    def sort_label(self) -> str:
-        if not self.SORT_FIELDS:
-            return ""
-        return self.SORT_FIELDS[self.sort_index][0]
-
     def status(self) -> str:
         bits = [f"{len(self._rows)} rows"]
-        if self.sort_label():
-            bits.append(f"sort {self.sort_label()}")
+        if self.sort_column():
+            bits.append(f"sort by {self.sort_column()} ▼")
         if self.needle:
             bits.append(f"filter {self.needle!r}")
         return " · ".join(bits)
 
 
 class TokensPane(TablePane):
+    """Token totals, with one model as one row by default.
+
+    The same model is usually reached through more than one tracker, and the
+    question "how much did this model cost me" has one answer, not three. So the
+    default view merges by model name (case-folded) and puts each tracker in its
+    own column; g cycles to the per-call-row and per-tracker views.
+    """
+
     TAB_KEY = "tokens"
-    COLUMNS = ("source", "model", "provider", "input", "output", "cache r",
-               "cache w", "total", "req", "last used")
-    SORT_FIELDS = (("tokens", "total"), ("requests", "requests"),
-                   ("recent", "last_used"), ("name", "model"))
+
+    MODES = ("model", "calls", "source")
+    MODE_LABELS = {
+        "model": "by model · merged across trackers",
+        "calls": "by model × tracker",
+        "source": "by tracker",
+    }
+    COLUMN_SETS = {
+        "model": ("model", "total", "cbut", "ocut", "qcut", "req", "last used"),
+        "calls": ("source", "model", "provider", "input", "output", "cache r",
+                  "cache w", "total", "req", "last used"),
+        "source": ("source", "total", "input", "output", "cache r", "cache w",
+                   "req", "last used"),
+    }
+    COLUMN_WIDTHS = {"source": 10, "model": 28, "provider": 12, "req": 6,
+                     "last used": 10, "cbut": 8, "ocut": 8, "qcut": 8}
+    SORT_FIELDS = (("tokens", "total", "total"), ("requests", "requests", "req"),
+                   ("recent", "last_used", "last used"), ("name", "model", "model"))
+
+    # Below these widths the cache split is what pushes the model name out of
+    # view — and the model is what the row is about.
+    WIDE = 128
+    MEDIUM = 108
 
     def __init__(self) -> None:
         super().__init__()
-        self.by_source = False
+        self.mode = "model"
+
+    def columns_for(self, width: int) -> tuple[str, ...]:
+        base = self.COLUMN_SETS[self.mode]
+        if width >= self.WIDE:
+            return base
+        if width >= self.MEDIUM:
+            return tuple(c for c in base if c != "provider")
+        return tuple(c for c in base if c not in ("provider", "cache r", "cache w"))
 
     def fetch(self, window):
         start, end = bounds_of(window, model.now_ms())
         rows = model.token_rows(start, end)
-        return model.by_source(rows) if self.by_source else rows
+        if self.mode == "model":
+            return model.model_totals(rows)
+        if self.mode == "source":
+            return model.by_source(rows)
+        return rows
 
-    def cells(self, row):
-        return (
-            Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
-            row.model,
-            row.provider or "—",
-            fmt_tokens(row.input),
-            fmt_tokens(row.output),
-            fmt_tokens(row.cache_read),
-            fmt_tokens(row.cache_write),
-            fmt_tokens(row.total),
-            f"{row.requests:,}",
-            fmt_age(row.last_used),
-        )
+    def cells(self, row) -> dict[str, object]:
+        if isinstance(row, model.ModelTotal):
+            return {
+                "model": row.model,
+                "total": f"{fmt_tokens(row.total):>7}",
+                "cbut": self._per(row, "cbut"),
+                "ocut": self._per(row, "ocut"),
+                "qcut": self._per(row, "qcut"),
+                "req": f"{row.requests:,}",
+                "last used": fmt_age(row.last_used),
+            }
+        return {
+            "source": Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
+            "model": row.model,
+            "provider": row.provider or Text("—", style="dim"),
+            "input": f"{fmt_tokens(row.input):>8}",
+            "output": f"{fmt_tokens(row.output):>8}",
+            "cache r": f"{fmt_tokens(row.cache_read):>8}",
+            "cache w": f"{fmt_tokens(row.cache_write):>8}",
+            "total": f"{fmt_tokens(row.total):>8}",
+            "req": f"{row.requests:>6,}",
+            "last used": fmt_age(row.last_used),
+        }
+
+    @staticmethod
+    def _per(item: model.ModelTotal, key: str):
+        value = item.per_source.get(key)
+        if not value:
+            return Text(f"{'—':>7}", style="dim")
+        # Padded here rather than by justify: a cell is rendered on its own, so
+        # justify pads against the wrong width and the column stops lining up.
+        return Text(f"{fmt_tokens(value):>7}", style=SOURCE_STYLE.get(key, ""))
 
     def group_toggle(self) -> None:
-        self.by_source = not self.by_source
+        index = self.MODES.index(self.mode)
+        self.mode = self.MODES[(index + 1) % len(self.MODES)]
+        self._paint_columns(self.app.size.width, force=True)
         self.reload(self.window)
 
     def note(self, window, rows) -> str:
-        grouped = "by source" if self.by_source else "by model"
         total = sum(r.total for r in rows)
-        return (f"{grouped} · total {fmt_tokens(total)} · "
-                "total is each host's own column (cache included where the host reports it)")
+        tail = (" · g changes the grouping" if self.mode != "source"
+                else " · g changes the grouping")
+        return (f"{len(rows)} rows {self.MODE_LABELS[self.mode]} · "
+                f"total {fmt_tokens(total)}{tail}")
 
     def open_selected(self) -> None:
         row = self.selected()
-        if row is None or row.model == "(all models)":
+        if row is None:
             return
-        self.app.push_screen(ModelScreen(row.model, row.source, self.window))
+        if isinstance(row, model.ModelTotal):
+            self.app.push_screen(ModelScreen(row.model, None, self.window))
+        elif row.model != "(all models)":
+            self.app.push_screen(ModelScreen(row.model, row.source, self.window))
 
 
 class EntityPane(TablePane):
     """Skills and Tools: one row per name, one column per source."""
 
-    SORT_FIELDS = (("calls", "calls"), ("recent", "last_used"), ("name", "name"))
+    # Recent first: "what did I just use" is the question this tab gets asked
+    # more often than "what did I use most". s still cycles to calls.
+    SORT_FIELDS = (("recent", "last_used", "last used"), ("calls", "calls", "calls"),
+                   ("name", "name", "name"))
+    COLUMN_WIDTHS = {"name": 30, "calls": 22, "cbut": 7, "ocut": 7, "qcut": 7,
+                     "ok": 6, "fail": 5, "avg": 6, "last used": 10}
 
     def __init__(self, kind: str) -> None:
         super().__init__()
         self.kind = kind
         self.TAB_KEY = kind
-        self.COLUMNS = ("name", "total", "cbut", "ocut", "qcut", "ok", "fail",
+        self.COLUMNS = ("name", "calls", "cbut", "ocut", "qcut", "ok", "fail",
                         "avg", "last used")
+        self._total_calls = 0
+        self._max_calls = 0
 
     def fetch(self, window):
         start, end = bounds_of(window, model.now_ms())
         return model.entity_rows(self.kind, start, end)
 
-    def cells(self, row):
+    def _before_render(self, rows) -> None:
+        self._total_calls = sum(r.calls for r in rows)
+        # Bars are a magnitude chart (the busiest row fills the bar); the
+        # percentage beside them is the share of the window.
+        self._max_calls = max((r.calls for r in rows), default=0)
+
+    def cells(self, row) -> dict[str, object]:
         def per(key):
             value = row.per_source.get(key)
             if not value:
-                return Text("—", style="dim")
-            return Text(str(value), style=SOURCE_STYLE.get(key, ""))
+                return Text(f"{'—':>6}", style="dim")
+            return Text(f"{value:>6,}", style=SOURCE_STYLE.get(key, ""))
 
-        return (row.name, str(row.calls), per("cbut"), per("ocut"), per("qcut"),
-                str(row.ok), str(row.fail) if row.fail else Text("0", style="dim"),
-                _avg(row.avg_ms), fmt_age(row.last_used))
+        calls = Text(f"{row.calls:>6} ")
+        calls.append_text(share_bar(row.calls, self._max_calls, width=8))
+        calls.append(f" {pct(row.calls, self._total_calls):>3}")
+        return {
+            "name": row.name,
+            "calls": calls,
+            "cbut": per("cbut"),
+            "ocut": per("ocut"),
+            "qcut": per("qcut"),
+            "ok": str(row.ok),
+            "fail": str(row.fail) if row.fail else Text("0", style="dim"),
+            "avg": _avg(row.avg_ms),
+            "last used": fmt_age(row.last_used),
+        }
 
     def note(self, window, rows) -> str:
         shared = sum(1 for r in rows if len([v for v in r.per_source.values() if v]) > 1)
         return (f"{len(rows)} {self.kind} · {shared} used by more than one tracker"
-                " · ok = completed, fail = error/incomplete")
+                " · bar = share of calls in this window")
 
     def open_selected(self) -> None:
         row = self.selected()
         if row is not None:
-            self.app.push_screen(EntityScreen(row.name, self.kind, self.window))
+            self.app.push_screen(EntityScreen(row.name, self.kind, self.window, row.calls))
 
 
 class UsagePane(TablePane):
     TAB_KEY = "usage"
     COLUMNS = ("when", "source", "model", "tokens", "project", "session")
-    COLUMN_WIDTHS = (10, 10, 24, 8, 30, 10)
-    SORT_FIELDS = (("time", "ts"), ("tokens", "total"), ("source", "source"))
+    COLUMN_WIDTHS = {"when": 10, "source": 10, "model": 24, "tokens": 10,
+                     "project": 36, "session": 9}
+    SORT_FIELDS = (("time", "ts", "when"), ("tokens", "total", "tokens"),
+                   ("source", "source", "source"))
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._raw = 0
 
     def fetch(self, window):
         start, end = bounds_of(window, model.now_ms())
-        return model.call_rows(start, end)
+        rows = model.call_rows(start, end)
+        self._raw = len(rows)
+        # Collapsing is a time-order courtesy: "the biggest calls" has to stay
+        # one row per call or the ranking stops being a ranking.
+        if self.sort_index == 0:
+            rows = model.collapse_calls(rows)
+        return rows
 
-    def cells(self, row):
-        return (
-            fmt_age(row.ts),
-            Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
-            row.model or "—",
-            fmt_tokens(row.total),
-            _shorten(row.project) or "—",
-            row.session[:8] or "—",
-        )
+    def cells(self, row) -> dict[str, object]:
+        tokens = Text()
+        if row.count > 1:
+            tokens.append(f"×{row.count} ", style="dim")
+        tokens.append(fmt_tokens(row.total))
+        return {
+            "when": fmt_age(row.ts),
+            "source": Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
+            "model": row.model or Text("—", style="dim"),
+            "tokens": tokens,
+            "project": _project(row.project, self.COLUMN_WIDTHS["project"]),
+            "session": row.session[:8] or Text("—", style="dim"),
+        }
 
     def note(self, window, rows) -> str:
-        return f"{len(rows)} most recent calls across the three trackers"
-
+        text = ""
+        if self.sort_index == 0 and self._raw and self._raw != len(rows):
+            text = (f"{self._raw:,} calls in {len(rows):,} rows "
+                    "· identical calls within a minute share a row")
+        else:
+            text = f"{len(rows):,} most recent calls across the three trackers"
+        home = str(Path.home())
+        if rows and all(not r.project or r.project == home for r in rows):
+            text += " · every call ran from ~, so the project column is blank"
+        return text
 
 
 class DashboardPane(Pane):
+    """The screen that answers "where did the tokens go, and is that more?".
+
+    Three panels, one time scale: a KPI strip, one chart whose every series
+    shares a y-axis, and two ranked lists that show proportion rather than
+    asking the reader to divide two numbers. The window you pick is the window
+    drawn — a "today" chart that quietly shows a week is how a dashboard stops
+    meaning anything.
+    """
+
     TAB_KEY = "dashboard"
+    can_focus = True
+
+    BINDINGS = [
+        Binding("up", "move(-1)", "up", show=False),
+        Binding("down", "move(1)", "down", show=False),
+        Binding("enter", "open_row", "open", show=False),
+    ]
 
     DEFAULT_CSS = """
     DashboardPane { height: 1fr; padding: 0 1; }
-    DashboardPane #kpi { height: 4; }
-    DashboardPane #chart { height: auto; max-height: 12; }
+    DashboardPane #kpi { height: 3; }
+    DashboardPane #chart { height: auto; }
     DashboardPane #tops { height: 1fr; }
     DashboardPane .top { width: 1fr; padding: 0 1; }
     """
@@ -385,6 +595,12 @@ class DashboardPane(Pane):
     def __init__(self) -> None:
         super().__init__()
         self.window = None
+        self._kpis = model.kpis(None, model.now_ms())
+        self._timeline = model.Timeline(unit="day", labels=[])
+        self._models: list[model.ModelTotal] = []
+        self._skills: list = []
+        self._recent: list = []
+        self._sel = 0
 
     def compose(self) -> ComposeResult:
         yield Static(id="kpi")
@@ -393,83 +609,187 @@ class DashboardPane(Pane):
             yield Static(id="top-models", classes="top")
             yield Static(id="top-skills", classes="top")
 
+    # -- data ---------------------------------------------------------------
+
     def reload(self, window) -> None:
         self.window = window
         start, end = bounds_of(window, model.now_ms())
-        k = model.kpis(start, end)
-        window_labels, _ = model.daily_tokens(start, end)
-        # A one-day window draws one bar, which says nothing. The chart keeps a
-        # week of context and says so in its title; the KPI strip above stays
-        # scoped to the chosen window.
-        chart_start = start
-        if len(window_labels) < 7:
-            # A whole-week boundary, not "now minus 7×24h": the latter spans
-            # eight calendar dates and draws eight bars.
-            chart_start = bounds_of("7d", end)[0]
-        labels, series = model.daily_tokens(chart_start, end)
-        rows = model.token_rows(start, end)
-        skills = model.entity_rows("skills", start, end)
+        self._kpis = model.kpis(start, end)
+        self._timeline = model.timeline(start, end)
+        self._models = model.model_totals(model.token_rows(start, end))
+        self._skills = sorted(model.entity_rows("skills", start, end),
+                              key=lambda r: (r.calls, r.last_used or 0), reverse=True)
+        self._recent = model.call_rows(start, end, limit=6)
+        if self._sel >= len(self._models):
+            self._sel = max(0, len(self._models) - 1)
+        self._paint()
 
-        delta = _delta(k.tokens, k.prev_tokens)
-        kpi = Text()
-        kpi.append(fmt_tokens(k.tokens), style="bold")
-        kpi.append(" tokens   ")
-        kpi.append_text(delta)
-        days_word = "day" if k.active_days == 1 else "days"
-        kpi.append(f"   {k.sessions:,} sessions   {k.calls:,} calls   "
-                   f"{k.active_days} active {days_word}\n")
-        split = "   ".join(
-            f"{s.label} {fmt_tokens(k.per_source.get(s.key, 0))}"
-            for s in SOURCES if s.key in k.per_source
-        )
-        kpi.append(split or "no data in this window", style="dim")
-        self.query_one("#kpi", Static).update(kpi)
+    # -- drawing ------------------------------------------------------------
 
-        chart = Text()
-        context = " · context" if len(labels) > len(window_labels) else ""
-        chart.append(f"tokens per day · {len(labels)}d{context}\n", style="bold")
-        for source in SOURCES:
-            values = series.get(source.key)
-            if not values:
-                continue
-            chart.append(f"  {source.label:<10}", style=SOURCE_STYLE.get(source.key, ""))
-            chart.append(sparkline(values) + "  ")
-            chart.append(f"{fmt_tokens(sum(values))}\n", style="dim")
-        if len(series) > 1:
-            combined = [sum(v[i] for v in series.values()) for i in range(len(labels))]
-            chart.append("  all        ", style="bold")
-            chart.append(sparkline(combined) + "  ")
-            chart.append(f"{fmt_tokens(sum(combined))}\n", style="dim")
-        self.query_one("#chart", Static).update(chart or Text("no tokens recorded in this window"))
+    def _layout(self) -> tuple[int, int, int]:
+        """(width, chart height, rows left for the lists) for the current size."""
+        width = max(40, self.size.width or 80)
+        height = self.size.height or 30
+        # The chart takes what is left after the KPI strip and the ranked lists,
+        # within bounds: fewer than 4 bar rows is a line, more than 9 is a waste.
+        chart_h = max(4, min(9, height - 13))
+        rows = max(2, height - 3 - 1 - 2 - chart_h)
+        return width, chart_h, rows
 
-        self.query_one("#top-models", Static).update(
-            self._top("models", [(r.model, r.total, r.label) for r in
-                                sorted(rows, key=lambda r: r.total, reverse=True)[:6]])
-        )
-        self.query_one("#top-skills", Static).update(
-            self._top("skills", [(r.name, r.calls, ",".join(
-                k for k, v in r.per_source.items() if v)) for r in
-                sorted(skills, key=lambda r: r.calls, reverse=True)[:6]], unit="calls")
-        )
+    def _paint(self) -> None:
+        width, chart_h, rows = self._layout()
+        self.query_one("#kpi", Static).update(self._kpi_text(width))
+        self.query_one("#chart", Static).update(self._chart_text(width, chart_h))
+        self._paint_tops(rows, width)
 
-    def _top(self, title, items, unit="tokens") -> Text:
-        out = Text(f"top {title}\n", style="bold")
-        if not items:
-            out.append("  nothing in this window", style="dim")
+    def _kpi_text(self, width: int = 120) -> Text:
+        k = self._kpis
+        total = k.tokens or 0
+        out = Text()
+        out.append(fmt_tokens(total), style="bold")
+        out.append(" tokens   ")
+        out.append_text(_delta(k.tokens, k.prev_tokens))
+        if k.prev_tokens is not None:
+            out.append(f" vs {fmt_tokens(k.prev_tokens)}", style="dim")
+        bits = [f"{k.sessions:,} sessions", f"{k.calls:,} calls"]
+        if k.active_days:
+            bits.append(f"{k.active_days} active "
+                        f"{'day' if k.active_days == 1 else 'days'}")
+        out.append("   ·   " + " · ".join(bits) + "\n")
+        if total <= 0:
+            out.append("nothing recorded in this window", style="dim")
             return out
-        width = max(len(str(name)) for name, _, _ in items)
-        for name, value, meta in items:
-            shown = fmt_tokens(value) if unit == "tokens" else f"{value:,}"
-            out.append(f"  {str(name):<{width}}  {shown:>7}  ", style="")
-            out.append(f"{meta}\n", style="dim")
+        first = True
+        for source in SOURCES:
+            value = k.per_source.get(source.key)
+            if value is None:
+                continue
+            if not first:
+                out.append("   ")
+            first = False
+            out.append(f"{source.label} ", style=SOURCE_STYLE.get(source.key, ""))
+            if width >= 110:
+                out.append_text(share_bar(value, total, width=8,
+                                          style=SOURCE_STYLE.get(source.key, "cyan")))
+                out.append(f" {fmt_tokens(value):>7}")
+            else:
+                out.append(f"{fmt_tokens(value)}")
+            out.append(f" {pct(value, total):>3}")
         return out
 
+    def _chart_text(self, width: int, height: int) -> Text:
+        chart = self._timeline
+        unit = "hour" if chart.unit == "hour" else "day"
+        out = Text()
+        out.append(f"tokens per {unit}", style="bold")
+        out.append(f"  ·  {window_label(self.window)}", style="dim")
+        totals = chart.totals
+        if totals and max(totals) > 0:
+            peak = max(totals)
+            out.append(f"  ·  peak {fmt_tokens(peak)} at {chart.labels[totals.index(peak)]}",
+                       style="dim")
+        out.append("\n")
+        lines = stacked_chart(chart.series, chart.labels, width=width,
+                              height=height, styles=SOURCE_STYLE)
+        for i, line in enumerate(lines):
+            out.append_text(line)
+            if i < len(lines) - 1:
+                out.append("\n")
+        return out
+
+    def _paint_tops(self, rows: int, width: int) -> None:
+        half = max(30, (width - 2) // 2)
+        name_w = max(10, half - 22)
+
+        total = sum(m.total for m in self._models)
+        models = Text()
+        models.append(f"top models · {fmt_tokens(total)}\n", style="bold")
+        if not self._models:
+            models.append("  nothing in this window", style="dim")
+        for i, item in enumerate(self._models[:rows]):
+            line = Text(style="reverse" if i == self._sel else "")
+            line.append(f" {item.model[:name_w]:<{name_w}}")
+            line.append(f" {fmt_tokens(item.total):>7} ")
+            line.append_text(share_bar(item.total, self._models[0].total, width=6,
+                                       style=self._model_style(item)))
+            line.append(f" {pct(item.total, total):>3}\n")
+            models.append_text(line)
+
+        # Tokens per call is the number the split hides: a tracker can use fewer
+        # tokens and still be the expensive one.
+        if len(self._models) + 4 <= rows and self._kpis.per_source_calls:
+            models.append("\nby tracker · tokens / call\n", style="bold")
+            for source in SOURCES:
+                tokens = self._kpis.per_source.get(source.key)
+                if tokens is None:
+                    continue
+                calls = self._kpis.per_source_calls.get(source.key, 0)
+                per_call = f"{fmt_tokens(round(tokens / calls))}/call" if calls else "—"
+                line = Text()
+                line.append(f" {source.label:<12}", style=SOURCE_STYLE.get(source.key, ""))
+                line.append(f" {fmt_tokens(tokens):>7}  {calls:>5,} calls  {per_call:>9}\n")
+                models.append_text(line)
+        self.query_one("#top-models", Static).update(models)
+
+        calls = sum(r.calls for r in self._skills)
+        side = Text()
+        side.append(f"top skills · {calls:,} calls\n", style="bold")
+        if not self._skills:
+            side.append("  none in this window · d widens it\n", style="dim")
+        for item in self._skills[:max(2, rows // 2)]:
+            line = Text()
+            line.append(f" {item.name[:name_w]:<{name_w}}")
+            line.append(f" {item.calls:>6,} ")
+            line.append_text(share_bar(item.calls, self._skills[0].calls, width=6))
+            line.append(f" {pct(item.calls, calls):>3}  ")
+            line.append(fmt_age(item.last_used), style="dim")
+            line.append("\n")
+            side.append_text(line)
+
+        if self._recent:
+            side.append("\nrecent calls\n", style="bold")
+            for call in self._recent:
+                line = Text()
+                line.append(f" {fmt_age(call.ts):>8}  ")
+                line.append(f"{call.label:<10}", style=SOURCE_STYLE.get(call.source, ""))
+                line.append(f" {call.model[:max(10, name_w - 14)]:<{max(10, name_w - 14)}}")
+                line.append(f" {fmt_tokens(call.total):>7}", style="dim")
+                line.append("\n")
+                side.append_text(line)
+        self.query_one("#top-skills", Static).update(side)
+
+    @staticmethod
+    def _model_style(item: model.ModelTotal) -> str:
+        """Colour the bar by its source when only one source used the model."""
+        if len(item.per_source) != 1:
+            return "cyan"
+        key = next(iter(item.per_source))
+        return SOURCE_STYLE.get(key, "cyan")
+
+    # -- keys ---------------------------------------------------------------
+
+    def action_move(self, delta: int) -> None:
+        if not self._models:
+            return
+        self._sel = max(0, min(len(self._models) - 1, self._sel + delta))
+        width, _chart_h, rows = self._layout()
+        self._paint_tops(rows, width)
+
+    def action_open_row(self) -> None:
+        self.open_selected()
+
+    def open_selected(self) -> None:
+        if self._models:
+            self.app.open_tokens_for(self._models[self._sel].model)
+
     def status(self) -> str:
-        return ""
+        if not self._models:
+            return "no models in this window"
+        return f"up/down picks a model · enter opens Tokens for {self._models[self._sel].model}"
 
 
 class SourcesPane(Pane):
-    """The old board: health, and the way into each tracker's own TUI."""
+    """Health of the three indexes, and the way into each tracker's own TUI."""
 
     TAB_KEY = "sources"
 
@@ -479,48 +799,111 @@ class SourcesPane(Pane):
     SourcesPane #note { height: 1; padding: 0 1; color: $text-muted; }
     """
 
-    COLUMNS = ("source", "tokens", "sessions", "7d trend", "last seen", "state", "index")
+    COLUMNS = ("source", "tokens", "share", "sessions", "7d trend", "last seen",
+               "state", "index")
+    COLUMN_WIDTHS = {"source": 12, "tokens": 8, "share": 12, "sessions": 8,
+                     "7d trend": 8, "last seen": 10, "state": 7, "index": 8}
 
     def __init__(self) -> None:
         super().__init__()
         self.window = None
         self._snaps: list = []
         self._trend: dict = {}
+        self._visible: tuple[str, ...] = ()
 
     def compose(self) -> ComposeResult:
         yield DataTable(id="table", cursor_type="row", zebra_stripes=True)
         yield Static(id="note")
 
     def on_mount(self) -> None:
-        self.query_one(DataTable).add_columns(*self.COLUMNS)
+        self._paint_columns(self.app.size.width)
 
-    def reload(self, window) -> None:
+    def on_resize(self, event) -> None:
+        if self._paint_columns(event.size.width):
+            self.reload(self.window)
+
+    def _paint_columns(self, width: int) -> bool:
+        cols = tuple(c for c in self.COLUMNS if not (c == "index" and width < 108))
+        if cols == self._visible:
+            return False
+        self._visible = cols
+        table = self.query_one(DataTable)
+        table.clear(columns=True)
+        for name in cols:
+            table.add_column(name, width=self.COLUMN_WIDTHS.get(name), key=name)
+        return True
+
+    # -- data ---------------------------------------------------------------
+
+    def reload(self, window, only: str | None = None) -> None:
+        """Reload every row, or — after a tracker's TUI hands the terminal back —
+        only the row that was visited, in place, so the table does not flicker
+        and the cursor stays where the reader left it."""
         self.window = window
+        if not self._visible:
+            self._paint_columns(self.app.size.width)
         start, end = bounds_of(window, model.now_ms())
-        days = 0 if start is None else max(1, round((end - start) / 86_400_000))
-        self._snaps = snapshots(days)
-        # The trend column is always a week, even when the numbers are today's:
-        # a one-bar "trend" is not a trend.
-        self._trend = {s.key: s.buckets for s in snapshots(7)}
+        days = 0 if start is None else max(1, round((end - start) / DAY_MS))
+
+        if only is not None and self._snaps:
+            for index, snap in enumerate(self._snaps):
+                if snap.key != only:
+                    continue
+                self._snaps[index] = BY_KEY[only].snapshot(days, since_ms=start)
+                # The trend is always a week, even when the numbers are today's:
+                # a one-bar trend is not a trend.
+                self._trend[only] = BY_KEY[only].snapshot(7).buckets
+                self._update_row(self._snaps[index])
+                break
+        else:
+            self._snaps = snapshots(days, since_ms=start)
+            self._trend = {s.key: s.buckets for s in snapshots(7)}
+            self._fill()
+        self._note()
+
+    def _row(self, snap) -> dict[str, object]:
+        total = sum(s.tokens or 0 for s in self._snaps)
+        live = snap.status in ("ok", "idle")
+        state = {"ok": "ok", "idle": "idle", "missing": "no db"}.get(snap.status, "error")
+        return {
+            "source": Text(snap.label, style=SOURCE_STYLE.get(snap.key, "")),
+            "tokens": fmt_tokens(snap.tokens),
+            "share": (Text("—", style="dim") if not snap.tokens
+                      else _share_cell(snap.tokens, total, snap.key)),
+            "sessions": str(snap.sessions) if live else Text("—", style="dim"),
+            "7d trend": sparkline(self._trend.get(snap.key, snap.buckets)),
+            "last seen": fmt_age(snap.last_event_ms),
+            "state": Text(state, style="green" if snap.status == "ok"
+                          else "yellow" if snap.status == "idle" else "red"),
+            "index": _human_size(snap.db_size),
+        }
+
+    def _fill(self) -> None:
         table = self.query_one(DataTable)
         cursor = max(0, table.cursor_row)
         table.clear(columns=False)
         for snap in self._snaps:
-            live = snap.status in ("ok", "idle")
-            table.add_row(
-                Text(snap.label, style=SOURCE_STYLE.get(snap.key, "")),
-                fmt_tokens(snap.tokens),
-                str(snap.sessions) if live else "—",
-                sparkline(self._trend.get(snap.key, snap.buckets)),
-                fmt_age(snap.last_event_ms),
-                Text(snap.status, style="green" if live else "red"),
-                _human_size(snap.db_size),
-            )
+            cells = self._row(snap)
+            table.add_row(*[cells.get(c, "") for c in self._visible], key=snap.key)
         if self._snaps:
             table.move_cursor(row=min(cursor, len(self._snaps) - 1))
-        self.query_one("#note", Static).update(
-            "enter opens that tracker's own TUI · r syncs all three"
-        )
+
+    def _update_row(self, snap) -> None:
+        table = self.query_one(DataTable)
+        cells = self._row(snap)
+        for name in self._visible:
+            try:
+                table.update_cell(snap.key, name, cells.get(name, ""))
+            except Exception:
+                return
+
+    def _note(self) -> None:
+        problems = [f"{s.label}: {s.note}" for s in self._snaps
+                    if s.status in ("missing", "error") or not s.tokens_real]
+        text = "enter opens that tracker's own TUI · r syncs all three"
+        if problems:
+            text += " · " + " · ".join(problems)
+        self.query_one("#note", Static).update(text)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self.open_selected()
@@ -532,7 +915,7 @@ class SourcesPane(Pane):
             self.app.open_tracker(self._snaps[index].key)
 
     def status(self) -> str:
-        return "enter opens a tracker"
+        return "enter opens a tracker · q there returns here"
 
 
 class CallsTable(Vertical):
@@ -561,7 +944,7 @@ class CallsTable(Vertical):
                 Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
                 row.model or "—",
                 fmt_tokens(row.total),
-                _shorten(row.project) or "—",
+                _project(row.project, 44),
                 row.session[:8] or "—",
             )
 
@@ -573,7 +956,7 @@ class ModelScreen(Screen[None]):
     ModelScreen #head { height: 4; padding: 1 1 0 1; }
     """
 
-    def __init__(self, model_name: str, source: str, window) -> None:
+    def __init__(self, model_name: str, source: str | None, window) -> None:
         super().__init__()
         # 'name' is a Textual DOMNode property; using it here raises at mount.
         self.model_name = model_name
@@ -584,12 +967,28 @@ class ModelScreen(Screen[None]):
         start, end = bounds_of(self.window, model.now_ms())
         calls = model.model_calls(self.source, self.model_name, start, end)
         labels, series = model.model_daily(self.source, self.model_name, start, end)
-        total = sum(c.total for c in calls)
+        total, count = model.model_stats(self.source, self.model_name, start, end)
         head = Text()
         head.append(f"{self.model_name}\n", style="bold")
-        head.append(f"{BY_KEY[self.source].label} · {window_label(self.window)} · "
-                    f"{len(calls)} calls · {fmt_tokens(total)} tokens\n")
-        head.append(sparkline(series) + f"  {len(labels)}d\n")
+        where = BY_KEY[self.source].label if self.source else "all trackers"
+        head.append(f"{where} · {window_label(self.window)} · "
+                    f"{count:,} calls · {fmt_tokens(total)} tokens")
+        if count > len(calls):
+            head.append(f"  ·  newest {len(calls)} below", style="dim")
+        head.append("\n")
+        if self.source is None:
+            # Per-source totals from the aggregate, not from the 200 listed
+            # rows: a split that adds up to 40M beside an 81M total is a lie
+            # the reader cannot see.
+            per: dict[str, int] = {}
+            for source in SOURCES:
+                value, seen = model.model_stats(source.key, self.model_name, start, end)
+                if seen:
+                    per[source.key] = value
+            head.append_text(_source_split(per, total))
+            head.append("\n")
+        else:
+            head.append(sparkline(series) + f"  {len(labels)}d\n")
         yield Static(head, id="head")
         yield CallsTable(calls)
 
@@ -601,18 +1000,24 @@ class EntityScreen(Screen[None]):
     EntityScreen #head { height: 3; padding: 1 1 0 1; }
     """
 
-    def __init__(self, entity_name: str, kind: str, window) -> None:
+    def __init__(self, entity_name: str, kind: str, window,
+                 total_calls: int | None = None) -> None:
         super().__init__()
         self.entity_name = entity_name
         self.kind = kind
         self.window = window
+        self.total_calls = total_calls
 
     def compose(self) -> ComposeResult:
         start, end = bounds_of(self.window, model.now_ms())
         rows = model.entity_calls(self.kind, self.entity_name, start, end)
+        count = self.total_calls if self.total_calls is not None else len(rows)
         head = Text()
         head.append(f"{self.entity_name}\n", style="bold")
-        head.append(f"{self.kind} · {window_label(self.window)} · {len(rows)} calls\n")
+        head.append(f"{self.kind} · {window_label(self.window)} · {count:,} calls")
+        if count > len(rows):
+            head.append(f"  ·  newest {len(rows)} below", style="dim")
+        head.append("\n")
         yield Static(head, id="head")
         yield CallsTable(rows)
 
@@ -632,8 +1037,9 @@ class AutApp(App[None]):
     #bar #range { width: 24; }
     #bar SelectCurrent { border: none; padding: 0 1; background: $panel;
                          color: $accent; }
-    #status { dock: bottom; height: 1; padding: 0 1; background: $boost; }
-    #hint { dock: bottom; height: 1; padding: 0 1; color: $text-muted; }
+    #foot { dock: bottom; height: 2; }
+    #status { height: 1; padding: 0 1; background: $boost; }
+    #hint { height: 1; padding: 0 1; color: $text-muted; }
     TabbedContent { height: 1fr; }
     #help-box { width: 74; height: auto; padding: 1 2; background: $panel;
                 border: round $accent; margin: 2 4; }
@@ -686,8 +1092,10 @@ class AutApp(App[None]):
                 yield UsagePane()
             with TabPane("Sources", id="tab-sources"):
                 yield SourcesPane()
-        yield Static(id="status")
-        yield Static(HINT, id="hint")
+        # Two docked rows at the same edge overlap, so they share one container:
+        # the status line names the window, the sort and the sync age; the hint
+        # below it names the keys.
+        yield Vertical(Static(id="status"), Static(HINT, id="hint"), id="foot")
 
     def on_mount(self) -> None:
         self.reload_active()
@@ -699,10 +1107,13 @@ class AutApp(App[None]):
         Without this the first focusable widget (the custom-range button) holds
         focus, and pressing enter opens the calendar instead of the selected row.
         """
+        pane = self.pane()
         try:
-            self.pane().query_one(DataTable).focus()
+            pane.query_one(DataTable).focus()
         except Exception:
-            pass
+            # The dashboard has no table; it owns up/down/enter itself, so it
+            # has to hold the focus or those keys go nowhere.
+            pane.focus()
 
     # -- plumbing ----------------------------------------------------------
 
@@ -766,14 +1177,18 @@ class AutApp(App[None]):
                 self.notify(f"{source.binary} is not on PATH", severity="warning")
                 continue
             with self.suspend():
-                print(f"aut: syncing {source.label}", flush=True)
+                print(f"\naut · syncing {source.label} ({source.binary} sync)\n", flush=True)
                 subprocess.call(source.sync_argv())
         self._synced_ms = int(time.time() * 1000)
         self.reload_active()
 
     def action_sort(self) -> None:
-        self.pane().action_sort()
-        self.query_one("#status", Static).update(self.pane().status())
+        pane = self.pane()
+        if not getattr(pane, "SORT_FIELDS", ()):
+            self.notify("this tab has no sort order", severity="information")
+            return
+        pane.action_sort()
+        self._update_bar(self.windows.get(pane.TAB_KEY, "1d"))
 
     def action_filter(self) -> None:
         self.pane().action_open_filter()
@@ -785,7 +1200,12 @@ class AutApp(App[None]):
         self.pane().open_selected()
 
     def action_group(self) -> None:
-        self.pane().group_toggle()
+        pane = self.pane()
+        if not isinstance(pane, TokensPane):
+            self.notify("g groups the Tokens tab only", severity="information")
+            return
+        pane.group_toggle()
+        self._update_bar(self.windows.get(pane.TAB_KEY, "1d"))
 
     def action_date_range(self) -> None:
         key = self.pane().TAB_KEY
@@ -820,15 +1240,45 @@ class AutApp(App[None]):
         self.push_screen(HelpScreen())
 
     def open_tracker(self, key: str) -> None:
+        """Hand the terminal to a tracker's own TUI, then take it back.
+
+        On return only the row that was visited is re-read, in place: the table
+        keeps its cursor and scroll position, nothing else flickers, and the
+        status line says where the numbers just came from.
+        """
         source = BY_KEY[key]
         if shutil.which(source.binary) is None:
             self.notify(f"{source.binary} is not on PATH — install that tracker first",
                         severity="error", timeout=6)
             return
         with self.suspend():
-            print(f"aut: {source.label} — press q to come back", flush=True)
+            print(f"\naut → {source.label} · q there returns to aut\n", flush=True)
             subprocess.call(source.launch_argv())
-        self.reload_active()
+
+        pane = self.pane()
+        window = self.windows.get(pane.TAB_KEY, "1d")
+        if isinstance(pane, SourcesPane):
+            pane.reload(window, only=key)
+        else:
+            pane.reload(window)
+        self._synced_ms = int(time.time() * 1000)
+        self._update_bar(window)
+        self._focus_table()
+
+    def open_tokens_for(self, model_name: str) -> None:
+        """Jump from a dashboard row to the rows behind it."""
+        pane = next((p for p in self.query(Pane) if p.TAB_KEY == "tokens"), None)
+        if not isinstance(pane, TokensPane):
+            return
+        self.query_one(TabbedContent).active = "tab-tokens"
+        box = pane.query_one("#filter", Input)
+        box.add_class("-on")
+        box.value = model_name          # fires on_input_changed, which reloads
+        # The keyboard belongs on the rows, not in the box: the filter is shown
+        # so it can be seen and cleared with esc, but the next key press should
+        # move the selection.
+        pane.query_one(DataTable).focus()
+        self._update_bar(self.windows.get("tokens", "1d"))
 
 
 def main(argv: list[str] | None = None) -> int:

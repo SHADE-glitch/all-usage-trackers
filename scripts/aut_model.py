@@ -21,7 +21,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from aut_db import open_ro
 from aut_sources import SOURCES, Source
@@ -76,6 +76,7 @@ class CallRow:
     project: str
     session: str
     total: int
+    count: int = 1
 
 
 @dataclass(slots=True)
@@ -85,6 +86,7 @@ class Kpis:
     calls: int = 0
     active_days: int = 0
     per_source: dict[str, int] = field(default_factory=dict)
+    per_source_calls: dict[str, int] = field(default_factory=dict)
     prev_tokens: int | None = None
     prev_sessions: int | None = None
 
@@ -321,6 +323,7 @@ def kpis(start_ms: int | None, end_ms: int, _delta: bool = True) -> Kpis:
         tokens = int(row[0] or 0)
         out.tokens += tokens
         out.per_source[key] = tokens
+        out.per_source_calls[key] = int(row[1] or 0)
         out.calls += int(row[1] or 0)
         out.sessions += int(row[2] or 0)
         out.active_days = max(out.active_days, int(row[3] or 0))
@@ -345,54 +348,74 @@ def now_ms() -> int:
 
 # --- detail screens ---------------------------------------------------------
 
-def model_calls(source_key: str, name: str, start_ms: int | None, end_ms: int,
+def model_calls(source_key: str | None, name: str, start_ms: int | None, end_ms: int,
                 limit: int = 200) -> list[CallRow]:
-    """Every call of one model on one source, newest first."""
-    source = next((s for s in SOURCES if s.key == source_key), None)
-    if source is None:
-        return []
-    conn = _connect(source)
-    if conn is None:
-        return []
+    """Every call of one model, newest first.
+
+    source_key=None means every tracker: one model is often used through more
+    than one tool, and the interesting number is the sum, not each half.
+    """
+    if source_key is None:
+        targets = list(SOURCES)
+    else:
+        target = next((s for s in SOURCES if s.key == source_key), None)
+        targets = [target] if target is not None else []
+
     where, params = _where(start_ms, end_ms)
-    try:
-        rows = conn.execute(
-            f"SELECT ts, {source.expr_project}, COALESCE(session_id, ''),"
-            f" {source.expr_total} FROM {source.table}"
-            f" WHERE {where} AND model = ? ORDER BY ts DESC LIMIT ?",
-            (*params, name, limit),
-        ).fetchall()
-    except sqlite3.Error:
-        return []
-    finally:
-        conn.close()
-    return [CallRow(ts=int(r[0]), source=source.key, label=source.label,
-                    model=name, project=str(r[1]), session=str(r[2]),
-                    total=int(r[3] or 0)) for r in rows]
+    out: list[CallRow] = []
+    for source in targets:
+        conn = _connect(source)
+        if conn is None:
+            continue
+        try:
+            rows = conn.execute(
+                f"SELECT ts, {source.expr_project}, COALESCE(session_id, ''),"
+                f" {source.expr_total} FROM {source.table}"
+                f" WHERE {where} AND model = ? ORDER BY ts DESC LIMIT ?",
+                (*params, name, limit),
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        finally:
+            conn.close()
+        out.extend(CallRow(ts=int(r[0]), source=source.key, label=source.label,
+                           model=name, project=str(r[1]), session=str(r[2]),
+                           total=int(r[3] or 0)) for r in rows)
+    out.sort(key=lambda r: r.ts, reverse=True)
+    return out[:limit]
 
 
-def model_daily(source_key: str, name: str, start_ms: int | None,
+def model_daily(source_key: str | None, name: str, start_ms: int | None,
                 end_ms: int) -> tuple[list[str], list[int]]:
-    source = next((s for s in SOURCES if s.key == source_key), None)
-    if source is None:
-        return [], []
-    conn = _connect(source)
-    if conn is None:
-        return [], []
-    where, params = _where(start_ms, end_ms)
+    """One model's tokens per day, summed across every tracker when key is None."""
+    if source_key is None:
+        targets = list(SOURCES)
+    else:
+        target = next((s for s in SOURCES if s.key == source_key), None)
+        targets = [target] if target is not None else []
+
     labels = day_labels(start_ms, end_ms)
-    try:
-        rows = conn.execute(
-            f"SELECT date(ts/1000,'unixepoch','localtime') AS d, SUM({source.expr_total})"
-            f" FROM {source.table} WHERE {where} AND model = ? GROUP BY d",
-            (*params, name),
-        ).fetchall()
-    except sqlite3.Error:
-        return labels, [0] * len(labels)
-    finally:
-        conn.close()
-    by_day = {str(r[0]): int(r[1] or 0) for r in rows}
-    return labels, [by_day.get(label, 0) for label in labels]
+    where, params = _where(start_ms, end_ms)
+    totals = {label: 0 for label in labels}
+    for source in targets:
+        conn = _connect(source)
+        if conn is None:
+            continue
+        try:
+            rows = conn.execute(
+                f"SELECT date(ts/1000,'unixepoch','localtime') AS d, SUM({source.expr_total})"
+                f" FROM {source.table} WHERE {where} AND model = ? GROUP BY d",
+                (*params, name),
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        finally:
+            conn.close()
+        for row in rows:
+            key = str(row[0])
+            if key in totals:
+                totals[key] += int(row[1] or 0)
+    return labels, [totals[label] for label in labels]
 
 
 def entity_calls(kind: str, name: str, start_ms: int | None, end_ms: int,
@@ -423,3 +446,173 @@ def entity_calls(kind: str, name: str, start_ms: int | None, end_ms: int,
                                session=str(r[2]), total=int(r[4] or 0)))
     out.sort(key=lambda r: r.ts, reverse=True)
     return out[:limit]
+
+# --- timeline ---------------------------------------------------------------
+
+@dataclass(slots=True)
+class Timeline:
+    """One chart's worth of numbers, already aligned to one label list."""
+    unit: str                   # "hour" | "day"
+    labels: list[str]           # short display labels, one per bucket
+    series: dict[str, list[int]] = field(default_factory=dict)
+
+    @property
+    def totals(self) -> list[int]:
+        if not self.series:
+            return [0] * len(self.labels)
+        return [sum(v[i] for v in self.series.values()) for i in range(len(self.labels))]
+
+
+@dataclass(slots=True)
+class ModelTotal:
+    """One model across every tracker that used it."""
+    model: str
+    total: int = 0
+    per_source: dict[str, int] = field(default_factory=dict)
+    requests: int = 0
+    last_used: int | None = None
+
+
+HOUR_MS = 3_600_000
+
+
+def granularity(start_ms: int | None, end_ms: int) -> str:
+    """Hours for a window of two days or less, days beyond that.
+
+    The window decides the unit: a one-day chart draws one day. Mixing a week of
+    context into a "today" chart is how a dashboard ends up meaning nothing.
+    """
+    if start_ms is None:
+        return "day"
+    return "hour" if (end_ms - start_ms) <= 2 * DAY_MS else "day"
+
+
+def hour_keys(start_ms: int, end_ms: int) -> list[datetime]:
+    first = datetime.fromtimestamp(start_ms / 1000).replace(minute=0, second=0, microsecond=0)
+    # Counted from the start of the first hour to the end of the window, so a
+    # rolling 24h span yields 24 bars and a calendar day yields the hours that
+    # have actually happened (00..13 at half past one).
+    span = end_ms - int(first.timestamp() * 1000)
+    count = max(1, -(-span // HOUR_MS))
+    count = min(count, 48)
+    return [first + timedelta(hours=i) for i in range(count)]
+
+
+def timeline(start_ms: int | None, end_ms: int) -> Timeline:
+    """Per-source tokens per bucket, on one shared axis."""
+    unit = granularity(start_ms, end_ms)
+    if unit == "hour" and start_ms is not None:
+        stamps = hour_keys(start_ms, end_ms)
+        keys = [s.strftime("%Y-%m-%dT%H") for s in stamps]
+        labels = [f"{s.hour:02d}" for s in stamps]
+        expr = "strftime('%Y-%m-%dT%H', ts/1000,'unixepoch','localtime')"
+    else:
+        unit = "day"
+        keys = day_labels(start_ms, end_ms)
+        labels = [k[5:] for k in keys]
+        expr = "date(ts/1000,'unixepoch','localtime')"
+
+    def query(conn, source, where, params):
+        rows = conn.execute(
+            f"SELECT {expr} AS b, SUM({source.expr_total}) FROM {source.table}"
+            f" WHERE {where} GROUP BY b",
+            params,
+        ).fetchall()
+        return [(source.key, r) for r in rows]
+
+    buckets: dict[str, dict[str, int]] = {}
+    for key, row in _per_source(start_ms, end_ms, query):
+        buckets.setdefault(key, {})[str(row[0])] = int(row[1] or 0)
+
+    out = Timeline(unit=unit, labels=labels)
+    for source in SOURCES:
+        day_map = buckets.get(source.key)
+        if day_map is None:
+            continue
+        out.series[source.key] = [day_map.get(k, 0) for k in keys]
+    return out
+
+
+def model_totals(rows: list[TokenRow]) -> list[ModelTotal]:
+    """Fold per-(source, model) rows into one row per model.
+
+    The same model is often used through two trackers; showing it twice splits
+    the number the reader came for. Case is folded so "Claude" and "claude" are
+    one model, and the row keeps the spelling that carried the most tokens.
+    """
+    merged: dict[str, ModelTotal] = {}
+    spellings: dict[str, dict[str, int]] = {}
+    for row in rows:
+        key = row.model.casefold()
+        target = merged.get(key)
+        if target is None:
+            target = merged[key] = ModelTotal(model=row.model)
+            spellings[key] = {}
+        spellings[key][row.model] = spellings[key].get(row.model, 0) + row.total
+        target.total += row.total
+        target.requests += row.requests
+        if row.last_used and (target.last_used is None or row.last_used > target.last_used):
+            target.last_used = row.last_used
+        target.per_source[row.source] = target.per_source.get(row.source, 0) + row.total
+    for key, target in merged.items():
+        best = max(spellings[key].items(), key=lambda kv: kv[1])[0]
+        target.model = best
+    return sorted(merged.values(), key=lambda m: m.total, reverse=True)
+
+
+def collapse_calls(rows: list[CallRow], bucket_ms: int = 60_000) -> list[CallRow]:
+    """Merge calls identical in every visible way within one minute.
+
+    One agent turn writes a dozen rows that differ only by a millisecond
+    timestamp. Printed one per line they bury the rows that matter; merged they
+    read as "this model, 26 calls, 42K tokens".
+    """
+    out: list[CallRow] = []
+    seen: dict[tuple, int] = {}
+    for row in rows:
+        key = (row.ts // bucket_ms, row.source, row.model, row.project, row.session)
+        slot = seen.get(key)
+        if slot is None:
+            seen[key] = len(out)
+            out.append(row)
+            continue
+        target = out[slot]
+        target.total += row.total
+        target.count += row.count
+        target.ts = max(target.ts, row.ts)
+    return out
+
+
+def model_stats(source_key: str | None, name: str, start_ms: int | None,
+                end_ms: int) -> tuple[int, int]:
+    """(tokens, calls) for one model — the whole window, not the first 200 rows.
+
+    The detail screen lists the newest calls, which is a page, not a total; the
+    header must not read 40M when the model used 81M.
+    """
+    if source_key is None:
+        targets = list(SOURCES)
+    else:
+        target = next((s for s in SOURCES if s.key == source_key), None)
+        targets = [target] if target is not None else []
+
+    where, params = _where(start_ms, end_ms)
+    tokens = 0
+    calls = 0
+    for source in targets:
+        conn = _connect(source)
+        if conn is None:
+            continue
+        try:
+            row = conn.execute(
+                f"SELECT SUM({source.expr_total}), COUNT(*) FROM {source.table}"
+                f" WHERE {where} AND model = ?",
+                (*params, name),
+            ).fetchone()
+        except sqlite3.Error:
+            continue
+        finally:
+            conn.close()
+        tokens += int(row[0] or 0)
+        calls += int(row[1] or 0)
+    return tokens, calls

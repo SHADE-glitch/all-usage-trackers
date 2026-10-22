@@ -349,6 +349,37 @@ class TestAggregation(AdapterCase):
         self.assertEqual(folded["ocut"].total, 10)
         self.assertEqual(folded["cbut"].requests, 2)
 
+    def test_model_totals_merge_the_same_model_across_trackers(self):
+        self._two_sources()
+        rows = model.model_totals(model.token_rows(0, self.now))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].model, "m-a")
+        self.assertEqual(rows[0].total, 175)
+        self.assertEqual(rows[0].requests, 3)
+        self.assertEqual(rows[0].per_source, {"cbut": 165, "ocut": 10})
+
+    def test_timeline_picks_a_unit_from_the_window(self):
+        from aut_picker import bounds_of
+
+        self._two_sources()
+        start, end = bounds_of("1d", self.now)
+        day = model.timeline(start, end)
+        self.assertEqual(day.unit, "hour")
+        self.assertEqual(len(day.labels), len(model.hour_keys(start, end)))
+
+        start, end = bounds_of("7d", self.now)
+        week = model.timeline(start, end)
+        self.assertEqual(week.unit, "day")
+        self.assertEqual(len(week.labels), 7)
+        self.assertEqual(sum(week.series["cbut"]), 165)
+        self.assertEqual(len(week.totals), 7)
+
+    def test_model_detail_reads_every_tracker_when_no_source_is_given(self):
+        self._two_sources()
+        calls = model.model_calls(None, "m-a", 0, self.now)
+        self.assertEqual({c.source for c in calls}, {"cbut", "ocut"})
+        self.assertEqual(sum(c.total for c in calls), 175)
+
     def test_skills_merge_by_name_case_insensitively(self):
         self._two_sources()
         rows = model.entity_rows("skills", 0, self.now)
@@ -438,18 +469,45 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(tabs.active, "tab-sources")
 
-    async def test_tokens_grouping_switches_row_granularity(self):
-        from aut_app import AutApp
+    async def test_tokens_groups_by_model_then_by_tracker(self):
+        from aut_app import AutApp, TokensPane
 
         app = AutApp()
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.press("4")
             await pilot.pause()
             pane = app.pane()
-            before = pane.by_source
+            self.assertIsInstance(pane, TokensPane)
+            self.assertEqual(pane.mode, "model")
+            # One model is one row, with a column per tracker.
+            self.assertIn("cbut", pane._visible)
+            self.assertNotIn("provider", pane._visible)
+
             await pilot.press("g")
             await pilot.pause()
-            self.assertNotEqual(pane.by_source, before)
+            self.assertEqual(pane.mode, "calls")
+            self.assertIn("provider", pane._visible)
+
+            await pilot.press("g")
+            await pilot.pause()
+            self.assertEqual(pane.mode, "source")
+            self.assertNotIn("provider", pane._visible)
+
+    async def test_the_sorted_column_is_marked_in_its_header(self):
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("2")
+            await pilot.pause()
+            pane = app.pane()
+            table = pane.query_one(DataTable)
+            marked = pane.sort_column()
+            self.assertIn("▼", str(table.columns[marked].label))
+            await pilot.press("s")
+            await pilot.pause()
+            self.assertIn("▼", str(table.columns[pane.sort_column()].label))
+            self.assertNotEqual(marked, pane.sort_column())
 
     async def test_filter_narrows_and_escape_restores(self):
         from aut_app import AutApp
@@ -495,3 +553,68 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChart(unittest.TestCase):
+    """The drawing, pinned glyph by glyph — a chart is easy to lie with."""
+
+    def test_every_series_shares_one_scale(self):
+        import aut_chart
+
+        lines = aut_chart.stacked_chart({"a": [10, 1]}, ["00", "01"],
+                                        width=40, height=10, styles={})
+        body = lines[:10]
+        axis = max(4, len("10")) + 2
+        tall = sum(1 for line in body if line.plain[axis] != " ")
+        short = sum(1 for line in body if line.plain[axis + 1] != " ")
+        self.assertEqual(tall, 10)
+        self.assertEqual(short, 1)
+
+    def test_the_axis_is_labelled_from_zero(self):
+        import aut_chart
+
+        lines = aut_chart.stacked_chart({"a": [4] * 7}, ["x"] * 7,
+                                        width=60, height=5, styles={})
+        axis = [line.plain for line in lines[:5]]
+        self.assertIn("0", axis[-1])
+        self.assertIn("4", axis[0])
+
+    def test_x_labels_are_anchored_to_the_newest_bucket(self):
+        import aut_chart
+
+        labels = [f"{hour:02d}" for hour in range(24)]
+        lines = aut_chart.stacked_chart({"a": [1] * 24}, labels,
+                                        width=80, height=4, styles={})
+        self.assertTrue(lines[-1].plain.rstrip().endswith("23"))
+        self.assertGreater(len(lines[-1].plain.strip()), 2)
+
+    def test_an_empty_window_says_so_instead_of_drawing_nothing(self):
+        import aut_chart
+
+        lines = aut_chart.stacked_chart({}, [], width=40, height=5, styles={})
+        self.assertEqual(len(lines), 1)
+        self.assertIn("no usage", lines[0].plain)
+
+    def test_share_bar_is_full_for_the_largest_and_empty_at_zero(self):
+        import aut_chart
+
+        full = aut_chart.share_bar(10, 10, width=6)
+        none = aut_chart.share_bar(0, 10, width=6)
+        self.assertEqual(full.plain.count(aut_chart.BLOCK), 6)
+        self.assertEqual(none.plain.count(aut_chart.BLOCK), 0)
+        self.assertEqual(len(none.plain), 6)
+
+
+class TestUsageCollapse(unittest.TestCase):
+    def test_identical_calls_within_a_minute_become_one_row(self):
+        row = model.CallRow(ts=1_000_000, source="cbut", label="CodeBuddy",
+                            model="m", project="/p", session="s", total=10)
+        other = model.CallRow(ts=1_000_500, source="cbut", label="CodeBuddy",
+                              model="m", project="/p", session="s", total=5)
+        later = model.CallRow(ts=1_060_000, source="cbut", label="CodeBuddy",
+                              model="m", project="/p", session="s", total=7)
+        rows = model.collapse_calls([later, other, row])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].count, 1)
+        self.assertEqual(rows[1].count, 2)
+        self.assertEqual(rows[1].total, 15)

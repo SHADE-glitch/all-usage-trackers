@@ -23,28 +23,36 @@
 
 | Tab | What it shows |
 | :--- | :--- |
-| **Dashboard** | tokens, sessions, calls and active days for the window, with the change against the previous window of the same length; per-source tokens per day; top models and top skills |
+| **Dashboard** | the window's tokens, sessions and calls, the change against the previous window of the same length, a stacked chart of the window itself (hourly for a day, daily beyond), top models, top skills, tokens per call per tracker, and the last calls |
 | **Tools** | one row per tool, with the calls each tracker made, ok / fail, average duration and last use |
 | **Skills** | the same shape for skills — the one place a skill's use in CodeBuddy and OpenCode sits on one line |
-| **Tokens** | one row per model with input, output, cache read, cache write, total and requests; `g` folds it to one row per source |
-| **Usage** | the most recent calls from all three, in one timeline |
-| **Sources** | each tracker's health, index size and 7-day trend; `enter` opens that tracker's own TUI |
+| **Tokens** | **one row per model**, merged across trackers by name, with a column per tracker; `g` cycles to model × tracker, then one row per tracker |
+| **Usage** | the most recent calls from all three in one timeline; identical calls within a minute share a row (`×26`), so the list shows turns rather than rows |
+| **Sources** | each tracker's health, share of the window's tokens, index size and 7-day trend; `enter` opens that tracker's own TUI |
 
 ```text
- aut · all usage trackers                                        📅 Custom…   7 days ▾
+ aut · all usage trackers                                       📅 Custom…   Today ▾
  Dashboard  Tools  Skills  Tokens  Usage  Sources
- 96.38M tokens   ↑380%   93 sessions   3,641 calls   1 active day
- CodeBuddy 6.80M   OpenCode 8.41M   Qoder CN 81.17M
+ 135.74M tokens   ↑305% vs 33.51M   ·   122 sessions · 5,329 calls · 1 active day
+ CodeBuddy 42.28M 31%   OpenCode 12.29M  9%   Qoder CN 81.17M 60%
 
- tokens per day · 7d · context
-   CodeBuddy ▅▅▅▆█▇▂  790.38M
-   OpenCode  ▇▅▂▂▂█▂  184.13M
-   Qoder CN  ▁▁▁▁▁█▃  357.03M
-   all        ▃▃▃▃▄█▃  1331.53M
-
-  top models                       top skills
-    dfmodel            81.17M      code-review   18 calls  cbut 12 / ocut 6
-    minimax-m3.1-free   8.11M      tdd            9 calls  cbut 9
+ tokens per hour  ·  Today  ·  peak 50.46M at 11
+ 50.5M ┤           █
+       │           █
+       │           █ █
+ 25.2M ┤           █ █
+       │          ████
+       │          ████
+     0 ┤█         ████
+       └──────────────
+         01 04 07 10 13
+  top models · 135.74M                             top skills · 0 calls
+   dfmodel                     81.17M ██████ 60%     none in this window · d widens it
+   deepseek-v4.1-flash         42.24M ███░░░ 31%
+   minimax-m3.1-flash-free     11.99M █░░░░░  9%   recent calls
+   deepseek-v4.1-flash-free      301K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
+   glm-5.3-flash                  38K █░░░░░  0%      1m ago  CodeBuddy  deepseek-v4.1-flash  150K
+                                                      2m ago  CodeBuddy  deepseek-v4.1-flash  148K
 ```
 
 ## Keys
@@ -55,11 +63,12 @@ The shared keys are the tracker family's, so a habit learned in `cbut` works her
 | :--- | :--- |
 | `tab` / `shift+tab` | next / previous tab |
 | `1`–`6` | jump to a tab directly |
-| `s` | cycle the sort order |
+| `s` | cycle the sort order — the sorted column is marked `▼` in its header |
 | `/` | filter rows ( `esc` clears) |
 | `d` | date range — presets or the custom calendar picker |
-| `enter` | open the selected row's detail |
-| `g` | Tokens: group by model ↔ by source |
+| `enter` | open the selected row's detail; on the Dashboard, open Tokens for the picked model |
+| `↑` `↓` | Dashboard only: pick a model |
+| `g` | Tokens: by model → model × tracker → tracker |
 | `r` | sync the three trackers now (runs their own `sync`) |
 | `?` `q` | help / quit |
 
@@ -70,7 +79,11 @@ Every tab remembers its own window, as the trackers do: Dashboard, Tokens and Us
 - **Tokens are the unit.** No credits, no dollars: the three trackers report credits, credits and dollars respectively, so one money column would present three units as one.
 - **A missing index is not a zero.** A tracker that is not installed, not synced or built by an older schema is skipped in the merges and reported on the Sources tab — never counted as "used nothing".
 - **ok / fail / pending** come from the status the hosts actually write: `completed` is ok; `error`, `incomplete` and `cancelled` are failures; `running`, `backgrounded` and no status at all are pending, which is not a failure.
+- **One model is one row.** The same model name through three trackers is one total with three columns, because "what did this model cost me" has one answer. Names merge case-insensitively; `g` still shows the per-tracker rows when that is what you want.
 - **Tool names merge case-insensitively** (`Read` in one tracker, `read` in another, one row). `Bash` and `shell` stay apart: whether they are the same tool is a guess this app does not make.
+- **One chart, one scale.** Every series in a chart shares a y-axis, so a 12M tracker and an 81M tracker do not draw the same bar. The percentage beside a bar is its share of the window; the bar itself is scaled to the largest row.
+- **The window is the chart.** `Today` draws today's hours, `7d` draws seven days — never a week hidden inside a day.
+- **Two numbers on one screen count the same calls.** The Sources tab takes its window from the tab, not from "the last N×24 hours", so it agrees with the KPI strip above it.
 - **There is no `a` key.** The trackers use it for "installed but never used", which has no cross-tool meaning here.
 
 ## What it does not do

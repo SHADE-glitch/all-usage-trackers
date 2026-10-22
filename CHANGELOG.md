@@ -4,6 +4,77 @@ Original project, **no upstream**. This records the decisions that are not
 obvious from the code — the ones a change in one of the three trackers, in
 Textual, or in a schema can invalidate.
 
+## 0.3.0
+
+The dashboard was rebuilt, the Tokens tab learned what a model is, and the
+hand-off to a tracker's own TUI stopped repainting the board.
+
+### Added
+
+- **A real dashboard**: one KPI strip (tokens, change against the previous
+  window, sessions, calls, active days), one stacked chart with a y axis, an x
+  axis and **one shared scale per chart**, then ranked lists that carry a
+  proportion bar, the tokens-per-call of each tracker, and the last calls.
+- **`up`/`down` on the dashboard** picks a model; `enter` opens Tokens filtered by
+  it. The dashboard previously had no action at all.
+- **Sort marker**: the sorted column's header carries a `▼` and the status line
+  names it, so `s` never has to be pressed to find out what it did. Panes without
+  a sort order say so instead of swallowing the key.
+- **`g` has three states on Tokens**: by model (default), model × tracker, tracker.
+- **`model_totals()`** and **`timeline()`** in the model layer, and a new
+  `aut_chart.py` with `stacked_chart`, `share_bar`, `pct`.
+- **Tests**: the chart's glyphs, the shared scale, label anchoring, the collapse
+  rule, and the sort marker.
+
+### Changed
+
+- **Tokens merges by model name by default.** The same model through three
+  trackers is one total with three columns; the per-source rows are one `g` away.
+- **Usage collapses identical calls within a minute** into one row (`×26`). 300
+  rows of one model became 52 rows that can be read. Only in time order: sorted by
+  tokens, one row is still one call.
+- **Skills and Tools open sorted by last use**, not by call count, and their bars
+  scale to the busiest row.
+- **Sources counts the tab's window**, not "the last N×24 hours". It used to
+  disagree with the KPI strip above it (357M against 127M on the same screen).
+- **Sources gained a share column**, and the note line now carries the reason a
+  row is not simply "ok".
+- **Narrow terminals**: Tokens drops `provider` below 128 columns and the cache
+  split below 108; Sources drops its index size below 108. Rows are never dropped.
+- **The status line was invisible.** `#status` and `#hint` both docked to the
+  bottom edge and were laid out on the same row; they now share a two-row footer.
+
+### Fixed
+
+- **`_share_cell` was referenced but never written** — the Sources tab raised
+  `NameError` on mount. Caught by opening the tab, not by the tests; the tests now
+  cover the cell helper.
+- **The x axis drew one label.** The density was computed from the number of
+  buckets instead of the plot's width, and the clamp pushed every label onto the
+  same column.
+- **The y axis never showed 0**, the one label a reader uses to judge a bar.
+
+### Decisions worth remembering
+
+- **The window is the chart.** A one-day window draws hours; it does not borrow a
+  week of context. The previous version drew 7 bars under a "Today" KPI, which is
+  why the screen read as decoration.
+- **Bars are a magnitude chart, percentages are shares.** A bar is scaled to the
+  largest row (so the ranking is visible); the number beside it is the share of
+  the window (so the sum is visible). Both are labelled, neither is implied.
+- **Model merging folds case, not provider.** `Claude` and `claude` are one
+  model; two providers serving the same model name are still one model, because
+  the question is about the model. The provider column survives in the
+  model × tracker view.
+- **A cell is padded in the string, not with `Text(justify=...)`.** A DataTable
+  renders each cell on its own, so justify pads against the wrong width and the
+  column stops lining up.
+- **`on_resize` repaints columns only when the visible set changes.** Dragging a
+  window edge must not re-query three databases per pixel.
+- **Returning from a tracker's TUI reloads one row.** `SourcesPane.reload(only=)`
+  updates cells by row key instead of clearing the table, so the cursor, the
+  scroll position and the other two rows survive the round trip.
+
 ## 0.2.0
 
 ### Added

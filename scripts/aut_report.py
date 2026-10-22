@@ -15,6 +15,7 @@ import sys
 import time
 
 from aut_db import WINDOWS
+from aut_picker import bounds_of
 from aut_sources import BY_KEY, SOURCES, Snapshot, snapshots
 
 
@@ -39,11 +40,27 @@ def _as_dict(snap: Snapshot) -> dict:
     }
 
 
+def _window(days: int) -> tuple[int | None, int]:
+    """The same window the board would use for this many days.
+
+    The board works in local calendar days, so `--days 1` here must mean "today"
+    and not "the last 24 hours" — otherwise the JSON and the TUI disagree about
+    a number they both claim to have read from the same index.
+    """
+    key = "all" if days <= 0 else f"{days}d"
+    try:
+        return bounds_of(key, int(time.time() * 1000))
+    except KeyError:
+        return None, int(time.time() * 1000)
+
+
 def cmd_json(args: argparse.Namespace) -> int:
+    start, _end = _window(args.days)
     payload = {
         "generated_at_ms": int(time.time() * 1000),
         "window_days": args.days,
-        "sources": [_as_dict(snap) for snap in snapshots(args.days)],
+        "window_start_ms": start,
+        "sources": [_as_dict(snap) for snap in snapshots(args.days, since_ms=start)],
     }
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0

@@ -78,7 +78,8 @@ class Source:
     def sync_argv(self) -> list[str]:
         return [self.binary, "sync"]
 
-    def snapshot(self, days: int, now_ms: int | None = None) -> Snapshot:
+    def snapshot(self, days: int, now_ms: int | None = None,
+                 since_ms: int | None = None) -> Snapshot:
         now = int(time.time() * 1000) if now_ms is None else now_ms
         path = self.db_path
         if not path.is_file():
@@ -100,7 +101,7 @@ class Source:
             )
 
         try:
-            return self._read(conn, days, now, path, size)
+            return self._read(conn, days, now, path, size, since_ms)
         except sqlite3.Error as exc:
             # A tracker that changed its schema is a real event, not a crash:
             # the row says so and the other two sources keep working.
@@ -112,8 +113,12 @@ class Source:
             conn.close()
 
     def _read(self, conn: sqlite3.Connection, days: int, now: int,
-              path: Path, size: int) -> Snapshot:
-        since = cutoff_ms(days, now)
+              path: Path, size: int, since_ms: int | None = None) -> Snapshot:
+        # A caller with a calendar window (the Sources tab) passes its own start,
+        # so this row and the KPI strip above it count the same calls. A rolling
+        # "last 24h" here against a "since midnight" total above is how two
+        # numbers on one screen end up disagreeing.
+        since = cutoff_ms(days, now) if since_ms is None else since_ms
         total, cost, calls, sessions, last_ts, real_avg = conn.execute(
             f"SELECT SUM({self.token_expr}), SUM({self.cost_expr}), COUNT(*),"
             f" COUNT(DISTINCT session_id), MAX(ts), AVG({self.real_col})"
@@ -249,5 +254,6 @@ SOURCES: tuple[Source, ...] = (
 BY_KEY = {source.key: source for source in SOURCES}
 
 
-def snapshots(days: int, now_ms: int | None = None) -> list[Snapshot]:
-    return [source.snapshot(days, now_ms) for source in SOURCES]
+def snapshots(days: int, now_ms: int | None = None,
+              since_ms: int | None = None) -> list[Snapshot]:
+    return [source.snapshot(days, now_ms, since_ms) for source in SOURCES]
