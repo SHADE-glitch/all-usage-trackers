@@ -86,6 +86,17 @@ One token number everywhere, and a dashboard that fits its content.
   one app that looked lighter. The override is gone; the top bar, cards, filter
   and help box keep the same `$panel` / `$boost` / `$accent` tokens the trackers
   use, so the palettes now match to the cell.
+- **The two range controls are cbut's, including "Custom…".** The top bar's
+  Select listed the seven presets only, so a custom span had nowhere to show:
+  the Select kept naming whatever preset was last chosen while the 📅 button
+  beside it showed a week, and the only way to a span was the 📅 button. The
+  Select now carries `Custom…` as its last entry and opens the picker, a window
+  picked in the calendar reads `Custom…` in the Select (it has no preset to
+  name) with the span on the 📅 control, and cancelling puts the bar back.
+  A programmatic `Select.value` write is told from a user choice by comparing
+  against the tab's own window, so switching tabs no longer re-opens the picker.
+  The Select is 30 cells wide, as in cbut, so `30 days` and `Custom…` are not
+  clipped. Windows remain per tab and the defaults are unchanged.
 
 ### Tests
 

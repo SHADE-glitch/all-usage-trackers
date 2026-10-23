@@ -49,6 +49,17 @@ DEFAULT_RANGES = {
 
 TAB_ORDER = ("dashboard", "tools", "skills", "tokens", "usage", "sources")
 
+# The top bar's preset list, in the tracker family's order. Window values mirror
+# aut_picker so the two stay in sync. "Custom…" is the escape hatch to the date
+# picker, exactly as in cbut: it is never stored as a tab's window (a picked
+# window is a CustomWindow instead), but it *is* what the Select shows while one
+# is in force — the Select can only name a preset, and the 📅 control beside it
+# is what names the span.
+RANGE_OPTIONS = [(RANGE_LABELS[k], k)
+                 for k in ("1d", "2d", "3d", "7d", "14d", "30d", "all")] + [
+    ("Custom…", "custom")]
+CUSTOM_RANGE = "custom"
+
 # A tracker's sync parses every log it has not seen yet, so it can be slow — but
 # a sync that never returns must not wedge the board.
 SYNC_TIMEOUT_S = 300
@@ -1157,7 +1168,7 @@ class AutApp(App[None]):
                    padding: 0 1; background: $panel; color: $accent;
                    text-style: bold; }
     #bar #custom:hover { background: $boost; }
-    #bar #range { width: 24; }
+    #bar #range { width: 30; }
     #bar SelectCurrent { border: none; padding: 0 1; background: $panel;
                          color: $accent; }
     /* In the flow, not docked: the tabs take 1fr, so this lands directly above
@@ -1200,8 +1211,8 @@ class AutApp(App[None]):
             yield Static("[b]aut[/b] · all usage trackers", id="title")
             yield Button("📅 Custom…", id="custom")
             yield Select(
-                [(RANGE_LABELS[k], k) for k in ("1d", "2d", "3d", "7d", "14d", "30d", "all")],
-                value="1d", allow_blank=False, id="range",
+                RANGE_OPTIONS, value=DEFAULT_RANGES["dashboard"],
+                allow_blank=False, id="range",
             )
         with TabbedContent(initial="tab-dashboard"):
             with TabPane("Dashboard", id="tab-dashboard"):
@@ -1257,20 +1268,30 @@ class AutApp(App[None]):
         self._update_bar(window)
 
     def _update_bar(self, window) -> None:
+        """Point both top-bar controls at one tab's window, then redraw the status.
+
+        Two controls, two jobs, exactly as in cbut: the Select names a preset and
+        the 📅 button names a custom span. A custom window therefore reads
+        "Custom…" in the Select (it has no preset to show) while the button
+        carries the span — the bar never says "Today" while showing a week.
+        """
         label = window_label(window)
+        custom = isinstance(window, CustomWindow)
         try:
             button = self.query_one("#custom", Button)
-            # The Select can only name a preset; the button is what names a
-            # custom span, so the bar never says "Today" while showing a week.
-            button.label = (f"📅 {label} ▾" if isinstance(window, CustomWindow)
-                            else "📅 Custom…")
+            button.label = f"📅 {label} ▾" if custom else "📅 Custom…"
+            button.tooltip = label
+            # A Button does not re-lay-out when its label grows, so the control
+            # kept the width it was built with and cut the longer span down
+            # until the next full relayout.
             button.refresh(layout=True)
         except Exception:
             pass
         try:
             select = self.query_one("#range", Select)
-            if isinstance(window, str) and select.value != window:
-                select.value = window
+            target = CUSTOM_RANGE if custom else window
+            if isinstance(target, str) and select.value != target:
+                select.value = target
         except Exception:
             pass
         parts = []
@@ -1300,8 +1321,18 @@ class AutApp(App[None]):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "range" or event.value in (None, Select.BLANK):
             return
-        self.windows[self.pane().TAB_KEY] = str(event.value)
-        self.reload_active()
+        key = self.pane().TAB_KEY
+        value = self.windows.get(key, "1d")
+        if event.value == CUSTOM_RANGE:
+            # "Custom…" opens the picker — unless this is the programmatic sync
+            # that points the Select at a window that is already custom.
+            if not isinstance(value, CustomWindow):
+                self.action_date_range()
+            return
+        if event.value == value:
+            return                    # programmatic sync, not a user change
+        self.windows[key] = str(event.value)
+        self.reload_active()      # reload_active redraws the bar from the window
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "custom":
@@ -1403,6 +1434,10 @@ class AutApp(App[None]):
 
         def apply(result) -> None:
             if result is None:
+                # Cancel: the Select was already pointed at "Custom…" when the
+                # picker opened, so the bar has to be put back on the tab's real
+                # window — otherwise it says "Custom…" with no span beside it.
+                self._update_bar(self.windows.get(key, "1d"))
                 return
             self.windows[key] = result
             self.reload_active()

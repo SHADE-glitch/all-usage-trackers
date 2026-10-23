@@ -77,6 +77,8 @@ The footer is the key list, and it is per-tab: `s` is absent on Sources, `g` app
 
 Every tab remembers its own window, as the trackers do: Dashboard, Tokens and Usage open on today, Tools on the week, Skills on the month (skills are rare enough that a week is often one call each).
 
+The top bar is cbut's pair, with the same two jobs: the Select names a preset and opens the calendar on `Custom…`, and the 📅 button beside it names the picked span. A custom window therefore reads `Custom…` in the Select — it has no preset to name — while the button carries the range (`📅 10-01 08:00 → 10-03 18:30 ▾`). Cancelling the picker puts the bar back on the tab's real window.
+
 The screen is laid out like the three trackers: the state line (rows, sort, grouping, totals) sits **above** the table, the bottom line is provenance — how many indexes were read, how big they are, when they were last synced — and the footer lists the keys.
 
 `r` runs the three syncs behind the board instead of handing the terminal over: the status line names the tracker being synced (`syncing CodeBuddy 1/3`), `r` leaves the footer while it runs, and the tab is re-read once at the end. The Dashboard is a read-only summary — it has no selection and no `enter`, because every number on it is one keystroke away on its own tab.

@@ -817,6 +817,117 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertIsInstance(app.windows["dashboard"], CustomWindow)
 
+    async def test_the_range_control_offers_the_family_presets_and_custom(self):
+        """The Select is cbut's: the seven presets, then Custom….
+
+        The value list is the single source of truth for both controls, so a
+        preset missing from it is a preset the bar cannot show.
+        """
+        from aut_app import CUSTOM_RANGE, RANGE_OPTIONS
+
+        self.assertEqual([value for _label, value in RANGE_OPTIONS],
+                         ["1d", "2d", "3d", "7d", "14d", "30d", "all",
+                          CUSTOM_RANGE])
+        self.assertEqual(RANGE_OPTIONS[-1][0], "Custom…")
+
+    async def test_choosing_custom_opens_the_picker(self):
+        """Custom… is the escape hatch, and it opens the calendar.
+
+        It is not a window in its own right: the picker's result is stored as
+        a ``CustomWindow``, so a preset-list entry never becomes a tab's window.
+        """
+        from textual.widgets import Select
+
+        from aut_app import CUSTOM_RANGE, AutApp
+        from aut_picker import DateRangeModal
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            app.query_one("#range", Select).value = CUSTOM_RANGE
+            await pilot.pause()
+            self.assertIsInstance(app.screen, DateRangeModal,
+                                  "the Select's Custom… did not open the picker")
+
+    async def test_a_custom_window_reads_custom_in_the_select(self):
+        """One window, two controls: Select = Custom…, 📅 = the span.
+
+        The Select can only name a preset, so a picked span is shown there as
+        Custom… while the 📅 control beside it carries the actual range —
+        cbut's exact split, so neither control lies about what is drawn.
+        """
+        from textual.widgets import Button, Checkbox, Input, Select
+
+        from aut_app import CUSTOM_RANGE, AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("d")
+            await pilot.pause()
+            app.screen.query_one("#dr-start-date", Input).value = "2026-10-01"
+            app.screen.query_one("#dr-follow", Checkbox).value = False
+            app.screen.query_one("#dr-end-date", Input).value = "2026-10-03"
+            app.screen.query_one("#dr-ok", Button).press()
+            await pilot.pause()
+            self.assertEqual(app.query_one("#range", Select).value, CUSTOM_RANGE)
+            label = str(app.query_one("#custom", Button).label)
+            self.assertIn("10-01", label)
+            self.assertIn("10-03", label)
+            self.assertNotIn("Custom…", label)
+
+    async def test_cancelling_the_picker_puts_the_bar_back(self):
+        """Cancel must not leave the Select on Custom… with no span beside it.
+
+        The Select is pointed at Custom… the moment the picker opens, so the
+        picker's own cancel path is the only thing that can undo it.
+        """
+        from textual.widgets import Button, Select
+
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("d")
+            await pilot.pause()
+            app.screen.query_one("#dr-cancel", Button).press()
+            await pilot.pause()
+            self.assertEqual(app.windows["dashboard"], "1d")
+            self.assertEqual(app.query_one("#range", Select).value, "1d")
+            self.assertEqual(str(app.query_one("#custom", Button).label),
+                             "📅 Custom…")
+
+    async def test_each_tab_keeps_its_own_window(self):
+        """A window belongs to its tab, and the bar follows the tab you are on.
+
+        cbut's rule: switching tabs shows that tab's range, never the one last
+        picked somewhere else.
+        """
+        from textual.widgets import Select
+
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            self.assertEqual(app.windows["dashboard"], "1d")
+            # Tools opens on the week; the bar must say so on arrival.
+            await pilot.press("2")
+            await pilot.pause()
+            self.assertEqual(app.windows["tools"], "7d")
+            self.assertEqual(app.query_one("#range", Select).value, "7d")
+            app.query_one("#range", Select).value = "14d"
+            await pilot.pause()
+            self.assertEqual(app.windows["tools"], "14d")
+            # Back to the Dashboard: its own window is untouched...
+            await pilot.press("1")
+            await pilot.pause()
+            self.assertEqual(app.windows["dashboard"], "1d")
+            self.assertEqual(app.query_one("#range", Select).value, "1d")
+            # ...and the change on Tools survived the round trip.
+            await pilot.press("2")
+            await pilot.pause()
+            self.assertEqual(app.query_one("#range", Select).value, "14d")
+
     async def test_enter_with_no_rows_is_a_no_op(self):
         from aut_app import AutApp
 
