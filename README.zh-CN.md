@@ -178,6 +178,7 @@ scripts/aut_picker.py       家族的时间范围选择器
 scripts/aut_report.py       JSON 视图
 scripts/tests/test_aut.py   套件（临时 HOME 里的夹具库）
 docs/maintenance/           三家契约——每个适配器假定了什么
+docs/audit/                 按日期归档的只读审计报告（是快照，不是当前状态）
 ```
 
 ## 🧩 加第四个追踪器

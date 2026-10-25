@@ -178,6 +178,7 @@ scripts/aut_picker.py        the family's date-range picker
 scripts/aut_report.py        the JSON view
 scripts/tests/test_aut.py    the suite (fixture databases in a temp HOME)
 docs/maintenance/            the tracker contracts — what each adapter assumes
+docs/audit/                  dated read-only audit reports (a snapshot, not current state)
 ```
 
 ## 🧩 Adding a fourth tracker

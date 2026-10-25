@@ -13,6 +13,33 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+## D-006 · 2026-10-25 · chore
+
+**Symptom** — the 2026-10-25 read-only audit of this repository existed only as a one-off session
+report: P0 × 1 (BYOK/no-token sources shown as 0 in the merged views), P1 × 12, P2 × 18, plus a
+14-row test-gap checklist, five next steps and the probe environment. Nothing in the repository
+pointed a reader at it, and its numbers (52 tests, 24.7s) describe a tree the fixes have since
+moved past.
+
+**Change** — file the report as `docs/audit/2026-10-25.md`, English, matching this
+repository's dimension-A English-first convention. The banner marks it a 2026-10-25 snapshot and
+names the suites as the source of current state. Each finding that a post-audit commit repaired
+carries that commit on its heading — verified against the commits' own diffs, not assumed:
+`68b2a9c` covers P0-1, P1-1..P1-6, P1-11, P1-12, P2-1, P2-3..P2-6; `9570347` covers P1-7..P1-10
+and P2-11; `7e5d8c0` covers P2-2, P2-7..P2-9, P2-12, P2-13, P2-15, P2-16, P2-18; `444098b`
+covers P2-14 and part of P2-10. Still open: P2-10's `timeline` and P2-17. Every finding keeps
+its severity, `file:line` evidence, impact and fix direction; the prose is compressed but nothing
+is dropped and no number is changed. Both READMEs gain the `docs/audit/` row in their layout
+block, so the tree on disk and the tree the docs draw stay identical.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests`: 72 tests, OK on the final tree.
+The new document is a pure addition under `docs/audit/` — no script, test or root file touched —
+so the suite and `.github/workflows/ci.yml` are unaffected.
+
+**Cost** — records only; no behaviour change. The audit's line numbers describe the 2026-10-25
+tree (suite at 52 tests), not HEAD; the document says so in its banner.
+
+
 ## D-005 · 2026-10-25 · chore
 
 **Symptom** — `aut_model` carried two functions with no caller and no test
