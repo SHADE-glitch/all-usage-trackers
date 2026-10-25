@@ -13,6 +13,25 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+## D-005 · 2026-10-25 · chore
+
+**Symptom** — `aut_model` carried two functions with no caller and no test
+(`_classify`, `daily_tokens`), and both the report's docstring and the READMEs
+called `aut json` "the same snapshot the board draws". With D-003 the board
+reads each source inside one read transaction, so "the same snapshot" was now a
+stronger claim than either path makes: the JSON report reads each source
+separately, and no claim is made across the three.
+
+**Change** — the two dead functions are gone; `OK_STATUSES` / `FAIL_STATUSES`
+stay because the entity rows still classify by them. The wording now says what
+is true and checkable — the same numbers, through the same adapters, each
+source read inside one transaction.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests`: 72 tests, OK;
+`grep` for both deleted names returns nothing outside this entry.
+
+**Cost** — none to behaviour; nothing called either function.
+
 ## D-004 · 2026-10-25 · fix
 
 **Symptom** — six more places where the board said something it could not

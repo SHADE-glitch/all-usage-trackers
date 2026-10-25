@@ -252,15 +252,6 @@ def _per_source(start_ms, end_ms, fn):
     return out
 
 
-def _classify(status) -> str:
-    value = (status or "").strip().lower()
-    if value in OK_STATUSES:
-        return "ok"
-    if value in FAIL_STATUSES:
-        return "fail"
-    return "pending"
-
-
 def _opt_int(value) -> int | None:
     """SQL NULL means "not reported"; it must not become a zero."""
     return int(value) if value is not None else None
@@ -428,32 +419,6 @@ def day_labels(start_ms: int | None, end_ms: int, max_days: int = 30) -> list[st
         start_day = end_day - timedelta(days=max_days - 1)
         span = max_days
     return [(start_day + timedelta(days=i)).isoformat() for i in range(span)]
-
-
-def daily_tokens(start_ms: int | None, end_ms: int) -> tuple[list[str], dict[str, list[int]]]:
-    """Per-source tokens per local day, aligned to one shared label list."""
-    labels = day_labels(start_ms, end_ms)
-    series: dict[str, list[int]] = {}
-
-    def query(conn, source, where, params):
-        rows = conn.execute(
-            f"SELECT date(ts/1000,'unixepoch','localtime') AS d,"
-            f" SUM({source.expr_total}) FROM {source.table}"
-            f" WHERE {where} GROUP BY d",
-            params,
-        ).fetchall()
-        return [(source.key, r) for r in rows]
-
-    buckets: dict[str, dict[str, int]] = {}
-    for key, r in _per_source(start_ms, end_ms, query):
-        buckets.setdefault(key, {})[str(r[0])] = int(r[1] or 0)
-
-    for source in SOURCES:
-        day_map = buckets.get(source.key)
-        if day_map is None:
-            continue
-        series[source.key] = [day_map.get(label, 0) for label in labels]
-    return labels, series
 
 
 def kpis(start_ms: int | None, end_ms: int, _delta: bool = True) -> Kpis:

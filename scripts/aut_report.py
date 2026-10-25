@@ -2,8 +2,9 @@
 """Headless `aut`: JSON for scripting, sync without the TUI.
 
 `aut json` exists so the board's numbers can be checked from a shell or piped into
-something else. It prints the same snapshot the TUI draws — one code path, so the
-two cannot disagree.
+something else. It reads through the same adapters as the TUI, so the two cannot
+disagree about what a number means; each source is read inside one transaction,
+so one source's numbers come from one moment.
 """
 
 from __future__ import annotations

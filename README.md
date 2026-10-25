@@ -137,7 +137,7 @@ aut                  # the board
 aut cbut             # jump straight into one tracker's own TUI
 aut sync             # run the three trackers' own sync commands
 aut sync cbut ocut   # …or only some of them
-aut json --days 7    # the same snapshot the board draws, as JSON
+aut json --days 7    # the numbers the board draws, as JSON
 aut --help
 ```
 

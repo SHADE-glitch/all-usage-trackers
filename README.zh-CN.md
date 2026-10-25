@@ -137,7 +137,7 @@ aut                  # 看板
 aut cbut             # 直接进某家追踪器自己的 TUI
 aut sync             # 跑三家自己的同步命令
 aut sync cbut ocut   # ……或者只同步其中几家
-aut json --days 7    # 与看板同源的快照，输出 JSON
+aut json --days 7    # 与看板同源的数字，输出 JSON
 aut --help
 ```
 
