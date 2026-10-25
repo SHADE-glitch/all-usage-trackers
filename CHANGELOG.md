@@ -4,6 +4,39 @@ Original project, **no upstream**. This records the decisions that are not
 obvious from the code — the ones a change in one of the three trackers, in
 Textual, or in a schema can invalidate.
 
+Two kinds of entry appear below, both newest-first:
+
+- **`D-###`** — the decision ledger, from 2026-10-25 on. Monotonic, never reused;
+  `kind` ∈ `fix | perf | taste | guard | revert | chore`; an entry states what was
+  true **as of its commit**.
+- **`0.x.0`** — release notes written before the ledger existed, kept **verbatim**.
+  They are deliberately not backfilled into `D-###`: a record invented after the
+  fact is not a record.
+
+## D-001 · 2026-10-25 · guard
+
+**Symptom** — this repo's `AGENTS.md` declared dimension A, but the repo was not in
+`STANDARD.md` §0, so no audit ever looked at it. It carried none of the A-tier
+shape: no CI, no `docs/`, no `MAINTENANCE` pair, a `.gitignore` without the runtime
+entries, and a CHANGELOG with no `D-###` entry. A declaration nothing checks is a
+claim, not a state.
+
+**Change** — registered as the 18th governed repository (A, 11 of 11) and given the
+shape it claimed: `.github/workflows/ci.yml` (unittest on 3.11 / 3.14),
+`docs/maintenance/tracker-contracts.md` (what each adapter assumes about a tracker's
+index), the `MAINTENANCE` bilingual pair, the §4 runtime ignore entries, and the
+missing README sections — Install, Usage, Troubleshooting, Testing, Repository
+layout, Contributing, License — in both languages, plus the four-label block the
+Chinese page lacked.
+
+**Evidence** — `audit-layout.sh`: 18/18 repos match their dimension's shape;
+`python3 -m unittest discover -s scripts/tests`: 52 tests, OK.
+
+**Cost** — one more document can now drift from `scripts/aut_sources.py`. The
+contracts file states the tie-break: if the two disagree, the code is right and the
+document is a bug. The 0.1.0–0.5.0 notes below stay in their own format; the ledger
+starts here rather than pretending to cover them.
+
 ## 0.5.0
 
 One token number everywhere, and a dashboard that fits its content.

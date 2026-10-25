@@ -15,11 +15,19 @@
 
 **How to run** — `./install.sh`, then `aut`.
 
-**Where to look** — [AGENTS.md](AGENTS.md) for the invariants and the layout.
+**Where to look** — [AGENTS.md](AGENTS.md) for the invariants and the layout; [docs/maintenance/tracker-contracts.md](docs/maintenance/tracker-contracts.md) for what each adapter assumes about the three indexes.
 
 ---
 
-## Tabs
+## ✨ Features
+
+- **One board, three trackers.** Six tabs — Dashboard, Tools, Skills, Tokens, Usage, Sources — over the SQLite index each tracker already built. Nothing is parsed twice and nothing is written.
+- **Cross-tool answers.** A skill's use in CodeBuddy and OpenCode sits on one line; one model through three trackers is one total with a column per tracker.
+- **One definition of "tokens".** Every figure is the tracker's own *Usage Total*, stated per source, never the provider's API total.
+- **A per-tab footer.** Only the keys that can act on the current tab are drawn and listened for.
+- **A hand-off, not a replacement.** `enter` on Sources suspends the board and opens that tracker's own eight-tab TUI; its `q` returns to a re-read board.
+
+## 📊 The six tabs
 
 | Tab | What it shows |
 | :--- | :--- |
@@ -49,15 +57,11 @@
  │  flint-40b-free         ocut        4.96M █░░░░░   0%  │
  │                                                        │
  ╰────────────────────────────────────────────────────────╯
-
-
-
-
  3 of 3 indexes · 97.3 MB · synced 0s ago
  tab Next tab  shift+tab Prev tab  q Quit  r Sync now  d Date  ? Help
 ```
 
-## Keys
+## ⌨️ Keys
 
 The shared keys are the tracker family's, so a habit learned in `cbut` works here.
 
@@ -83,7 +87,7 @@ The screen is laid out like the three trackers: the state line (rows, sort, grou
 
 `r` runs the three syncs behind the board instead of handing the terminal over: the status line names the tracker being synced (`syncing CodeBuddy 1/3`), `r` leaves the footer while it runs, and the tab is re-read once at the end. The Dashboard is a read-only summary — it has no selection and no `enter`, because every number on it is one keystroke away on its own tab.
 
-## Reading the numbers
+## 🔢 Reading the numbers
 
 - **Tokens are the unit.** No credits, no dollars: the three trackers report credits, credits and dollars respectively, so one money column would present three units as one.
 - **A missing index is not a zero.** A tracker that is not installed, not synced or built by an older schema is skipped in the merges and reported on the Sources tab — never counted as "used nothing".
@@ -96,17 +100,91 @@ The screen is laid out like the three trackers: the state line (rows, sort, grou
 - **Two numbers on one screen count the same calls.** The Sources tab takes its window from the tab, not from "the last N×24 hours", so it agrees with the KPI strip above it.
 - **There is no `a` key.** The trackers use it for "installed but never used", which has no cross-tool meaning here.
 
-## What it does not do
+## 🚫 What it does not do
 
 - **It does not collect anything.** No log parsing, no network, no second copy of the truth: it reads the `usage.db` each tracker already built.
 - **It does not write.** Every connection is `mode=ro`; `r` and `enter` write only through the tracker's own commands.
 - **It does not replace the trackers.** The Sources tab is one key from their full eight-tab view.
 
-## Adding a fourth tracker
-
-One entry in `SOURCES` in [scripts/aut_sources.py](scripts/aut_sources.py): a key, a label, the database name, the binary, and the SQL expressions that normalise its token and project columns. Every tab picks it up.
-
-## Requirements
+## 📋 Requirements
 
 - Python 3.11+ (the board's only dependency is Textual; `aut json` and `aut sync` are pure standard library).
 - At least one of `cbut`, `ocut`, `qcut` installed and synced.
+
+| Component | Version | Notes |
+| :--- | :--- | :--- |
+| Python | 3.11+ | the floor is `requires-python` in `pyproject.toml`; CI covers 3.11 and 3.14 |
+| Textual | see `requirements.txt` | board only — `json` / `sync` need no third-party package |
+| Linux | any | reads `~/.local/share/*/usage.db` |
+
+## 📥 Install
+
+```bash
+git clone https://github.com/SHADE-glitch/all-usage-trackers.git
+cd all-usage-trackers
+./install.sh
+```
+
+`install.sh` is idempotent. It creates `.venv` in the repo and installs `requirements.txt` into it, then symlinks `bin/aut` into `~/.local/bin`, so `git pull` here updates the running install. It refuses to replace a real file at the target; pass `--force` if you really mean it. `AUT_BIN_DIR` moves the symlink target. The last step runs `aut json --days 7` and reports whether the three sources answered.
+
+If `aut` is not found afterwards, `~/.local/bin` is not on your `PATH`.
+
+## 🧭 Usage
+
+```bash
+aut                  # the board
+aut cbut             # jump straight into one tracker's own TUI
+aut sync             # run the three trackers' own sync commands
+aut sync cbut ocut   # …or only some of them
+aut json --days 7    # the same snapshot the board draws, as JSON
+aut --help
+```
+
+`aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` and is stdlib-only, so it works without the venv — which is what makes it usable from a script.
+
+## 🧯 Troubleshooting
+
+| Symptom | Cause | What to do |
+| :--- | :--- | :--- |
+| a source shows `missing` | that tracker is not installed, or its index was never built | install it and run its `sync`; `aut sync` does that for you |
+| a source shows `error` | its `usage.db` no longer matches the columns `aut` reads | see [the contracts file](docs/maintenance/tracker-contracts.md); the adapter is one entry in `scripts/aut_sources.py` |
+| a source shows `idle` | no calls in the last week — not a fault | nothing |
+| a model shows a plausible 0 | the tracker's column exists but stopped being written | check that tracker's own panel first; a zero here is the quiet failure |
+| `aut: command not found` | `~/.local/bin` not on `PATH` | add it, or re-run `install.sh` with `AUT_BIN_DIR` |
+| the board will not start, `aut json` works | the venv is gone or Textual is missing | re-run `./install.sh` |
+
+## 🧪 Testing
+
+```bash
+python3 -m unittest discover -s scripts/tests
+```
+
+The suite is stdlib-only and builds its own SQLite fixtures in a temporary `HOME`, so it never opens a real tracker index. CI runs it on Python 3.11 and 3.14. A green run with no fixture for the thing you changed proves nothing — see [MAINTENANCE.md](MAINTENANCE.md) for the three verification tiers.
+
+## 📁 Repository layout
+
+```text
+bin/aut                      the entry point (bash: still useful when the venv is gone)
+install.sh                   idempotent install: .venv + symlink into ~/.local/bin
+scripts/aut_sources.py       one adapter per tracker — the only file that knows a schema
+scripts/aut_db.py            read-only connections, windows, formatting
+scripts/aut_model.py         the cross-tool aggregation every tab draws (pure, no Textual)
+scripts/aut_chart.py         text bars and percentages
+scripts/aut_app.py           the Textual board: tabs, bindings, footer
+scripts/aut_picker.py        the family's date-range picker
+scripts/aut_report.py        the JSON view
+scripts/tests/test_aut.py    the suite (fixture databases in a temp HOME)
+docs/maintenance/            the tracker contracts — what each adapter assumes
+```
+
+## 🧩 Adding a fourth tracker
+
+One entry in `SOURCES` in [scripts/aut_sources.py](scripts/aut_sources.py): a key, a label, the database name, the binary, and the SQL expressions that normalise its token and project columns. Every tab picks it up. The contracts file lists what you have to find out about the new tracker first.
+
+## 🤝 Contributing
+
+This is a personal tool, but the rules are written down: read [AGENTS.md](AGENTS.md) for the invariants (read-only connections, one usage-total definition per source, the footer drawn from `check_action`), run the suite before and after, and add a `D-###` entry to [CHANGELOG.md](CHANGELOG.md) for anything that is not a plain feature.
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE).
