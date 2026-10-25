@@ -91,11 +91,12 @@
 
 - **单位是 token。** 没有 credit，没有美元：三家分别报 credit、credit 和美元，合成一列钱就是把三个单位当成一个。
 - **缺索引不是 0。** 没装、没同步、或由旧 schema 建出来的那一家会在合并里被跳过，并在 Sources 上说明——绝不算作「用了零」。
+- **缺 token 数字也不是 0。** 只报 credit、不报 token 的来源（qcut 的 BYOK 路由）在 Sources 上显示 `—`。Tokens 与 Dashboard 的合并里，只要一个模型有未上报 token 的调用，它也显示 `—`；看板不会只把已知行加起来，再把结果叫作总量。
 - **ok / fail / pending** 来自宿主真实写下的状态：`completed` 是 ok；`error`、`incomplete`、`cancelled` 是失败；`running`、`backgrounded` 以及完全没有状态是 pending，pending 不是失败。
 - **一个模型就是一行。** 同一个模型名穿过三家是一条总量加三列，因为「这个模型花了我多少」只有一个答案。名字按大小写不敏感合并；想看逐家行时 `g` 仍然给你。
 - **工具名按大小写不敏感合并**（一家写 `Read`、另一家写 `read`，合成一行）。`Bash` 与 `shell` 保持分开：它们是不是同一个工具，这个程序不去猜。
 - **一个数，带标签。** 看板打印的每个 token 数字都是那家的 **Usage Total**——各家面板自己用的定义（cbut：prompt + completion + cache hit；ocut：完整 prompt + output + 再加一次命中；qcut：input + output + cache read）。provider 自己的 API total 已经不再读；一个既不说 input、也不说 output 或 cache 的数字，永远是 Usage Total。
-- **一根条，一个刻度。** 一张表里所有条共用刻度，所以 12M 的一家与 81M 的一家不会画出同样长的条。条旁边的百分比是它在本窗口的份额；条本身按最大的那一行缩放。
+- **一根条，一个刻度。** 一张表里所有条共用刻度，所以 12M 的一家与 81M 的一家不会画出同样长的条。条旁边的百分比是它在本窗口的份额。排行表里的条按最大的那一行缩放；Sources 用窗口总量作分母，和它旁边印的百分比是同一个分母。
 - **卡片先长，然后面板滚动。** 列表卡片取它行数需要的高度，而不是截断到固定行数；屏幕满了之后是面板滚动，所以没有任何东西被悄悄裁掉。
 - **同一屏上的两个数字数的是同一批调用。** Sources 的窗口取自该 tab，而不是「最近 N×24 小时」，所以它与上方的 KPI 条一致。
 - **没有 `a` 键。** 追踪器用它表示「装了但没用过」，这件事在跨工具这里没有意义。
@@ -125,7 +126,7 @@ cd all-usage-trackers
 ./install.sh
 ```
 
-`install.sh` 可重复执行。它在仓里建 `.venv` 并把 `requirements.txt` 装进去，然后把 `bin/aut` 软链到 `~/.local/bin`，所以在仓里 `git pull` 就等于更新已安装的那份。目标位置是真实文件时它会拒绝覆盖；确实要覆盖就加 `--force`。`AUT_BIN_DIR` 可以换软链目录。最后一步会跑 `aut json --days 7`，并报告三家是否都答上了。
+`install.sh` 可重复执行。它在仓里建 `.venv` 并把 `requirements.txt` 装进去，然后把 `bin/aut` 软链到 `~/.local/bin`，所以在仓里 `git pull` 就等于更新已安装的那份。目标位置是真实文件时它会拒绝覆盖；确实要覆盖就加 `--force`。`AUT_BIN_DIR` 可以换软链目录。最后一步会跑 `aut json --days 7`，并报告是否有来源报错。
 
 如果之后 `aut` 找不到，那是 `~/.local/bin` 不在 `PATH` 里。
 
@@ -146,10 +147,10 @@ aut --help
 
 | 症状 | 原因 | 怎么办 |
 | :--- | :--- | :--- |
-| 某家显示 `missing` | 那家没装，或索引从未建过 | 装上并跑它自己的 `sync`；`aut sync` 会替你跑 |
+| 某家显示 `no db` | 那家没装，或索引从未建过 | 装上并跑它自己的 `sync`；`aut sync` 会替你跑 |
 | 某家显示 `error` | 它的 `usage.db` 与 `aut` 读的列对不上了 | 见[契约文件](docs/maintenance/tracker-contracts.md)；适配器就是 `scripts/aut_sources.py` 里的一条 |
 | 某家显示 `idle` | 最近一周没有调用——不是故障 | 不用管 |
-| 某个模型显示一个看着合理的 0 | 那家的列还在，但不再被写入 | 先去那家自己的面板核对；这里的 0 是那种安静失败 |
+| 某个模型显示 `—` | 那家报了调用，但没报 token（例如只记 credit 的 BYOK 路由） | 先去那家自己的面板核对；看板不会把未知写成 0 |
 | `aut: command not found` | `~/.local/bin` 不在 `PATH` 里 | 加进 `PATH`，或用 `AUT_BIN_DIR` 重跑 `install.sh` |
 | 看板起不来，但 `aut json` 正常 | venv 没了或 Textual 缺失 | 重跑 `./install.sh` |
 

@@ -37,6 +37,49 @@ contracts file states the tie-break: if the two disagree, the code is right and 
 document is a bug. The 0.1.0–0.5.0 notes below stay in their own format; the ledger
 starts here rather than pretending to cover them.
 
+## D-002 · 2026-10-25 · fix
+
+**Symptom** — a source that reports credits but no tokens (qcut's BYOK routes)
+reached the board as `0`: `aut_sources` already knew the difference, but
+`aut_model` ran every token column through `COALESCE(..., 0)`, and the dashboard
+turned the result into "nothing recorded". The same audit found three more
+places where the numbers did not mean what they said: `active_days` took the
+busiest tracker's count instead of the union of days, an entity's average
+duration divided by calls that had no duration, and an entity's drill-down
+queried only the spelling shown on the merged row. A NULL model was labelled
+`(unknown)` but the detail queried the literal string, so its calls vanished.
+Sources also applied only a start bound, so a custom historical window counted
+calls that happened after its end.
+
+**Change** — the three adapters now use the same `CASE` expressions as their
+own trackers' Usage Total: a row with missing API parts is NULL, not zero, and
+a missing cache column still contributes 0. `aut_model` keeps NULL through
+`TokenRow`, `ModelTotal`, `CallRow` and `Kpis`; a merged row with any
+unreported call is unknown, not a sum of the known rows. `Kpis.active_days` is
+the union of per-source dates; entity averages divide by `measured_calls`; an
+`EntityRow` carries every spelling and the detail queries all of them;
+`(unknown)` maps to `model IS NULL` / `name IS NULL`. The entity detail screen
+shows status and duration in their own columns instead of borrowing the model
+and token columns. The dashboard, Tokens and Sources show `—` for unknown, and
+the JSON report no longer exposes `cost` / `cost_unit` (the board does not show
+money). `Source.snapshot` now takes an `end_ms`: totals, buckets, top rows and
+the last-event clock are bounded by the window's end, so a historical window
+cannot see later calls. `SourcesPane` and `aut json` pass that end through, and
+the JSON report names it as `window_end_ms`. README/README.zh-CN, the help
+screen and `install.sh`'s source check were corrected to match.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests`: 62 tests, OK.
+The new cases cover BYOK NULLs, a mixed known/unknown model, missing cbut
+parts, active-day union, NULL-duration averages, `(unknown)` drill-down,
+entity spelling merge, entity status/duration, a custom end that excludes later
+calls, and an empty window that still reads `idle` from older history.
+
+**Cost** — `aut json` consumers that read `cost` or `cost_unit` must read the
+tracker's own index instead; those fields were the one place money still
+crossed the board's boundary. A partly reported window on Sources is still a
+floor (with `tokens_real: false` and a note), while the merged Tokens and
+Dashboard views show `—` rather than an unlabelled floor.
+
 ## 0.5.0
 
 One token number everywhere, and a dashboard that fits its content.

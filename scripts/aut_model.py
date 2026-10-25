@@ -81,13 +81,16 @@ class TokenRow:
     label: str
     model: str
     provider: str
-    input: int
-    output: int
-    cache_read: int
-    cache_write: int
-    total: int
+    input: int | None
+    output: int | None
+    cache_read: int | None
+    cache_write: int | None
+    total: int | None
     requests: int
     last_used: int | None
+    # False when any call in the row reported no usage: the total is then a
+    # floor, not an exact sum. None total means no token figure at all.
+    tokens_real: bool = True
 
 
 @dataclass(slots=True)
@@ -100,6 +103,12 @@ class EntityRow:
     pending: int = 0
     avg_ms: float | None = None
     last_used: int | None = None
+    # Every spelling the case-fold merged, the displayed one first. The detail
+    # queries all of them, so a merged row and its drill-down agree.
+    spellings: tuple[str, ...] = ()
+    # Calls with a measured duration. The average's denominator is this, not
+    # calls: a NULL duration is not a zero-millisecond call.
+    measured_calls: int = 0
 
 
 @dataclass(slots=True)
@@ -110,19 +119,24 @@ class CallRow:
     model: str
     project: str
     session: str
-    total: int
+    total: int | None
     count: int = 1
+    # Entity detail rows carry a status and a duration instead of a model and a
+    # token total; the table chooses its columns from these fields.
+    status: str = ""
+    duration_ms: int | None = None
 
 
 @dataclass(slots=True)
 class Kpis:
-    tokens: int = 0
+    tokens: int | None = None
     sessions: int = 0
     calls: int = 0
     active_days: int = 0
-    per_source: dict[str, int] = field(default_factory=dict)
+    per_source: dict[str, int | None] = field(default_factory=dict)
     prev_tokens: int | None = None
     prev_sessions: int | None = None
+    tokens_real: bool = True
 
 
 # --- plumbing ---------------------------------------------------------------
@@ -170,6 +184,18 @@ def _classify(status) -> str:
     return "pending"
 
 
+def _opt_int(value) -> int | None:
+    """SQL NULL means "not reported"; it must not become a zero."""
+    return int(value) if value is not None else None
+
+
+def _sum_opt(left: int | None, right: int | None) -> int | None:
+    """Add two optional counts; an unknown part makes the sum unknown too."""
+    if left is None or right is None:
+        return None
+    return left + right
+
+
 # --- tokens -----------------------------------------------------------------
 
 def token_rows(start_ms: int | None, end_ms: int) -> list[TokenRow]:
@@ -178,22 +204,28 @@ def token_rows(start_ms: int | None, end_ms: int) -> list[TokenRow]:
             f"SELECT COALESCE(model, '(unknown)'), COALESCE(provider, ''),"
             f" SUM({source.expr_input}), SUM({source.expr_output}),"
             f" SUM({source.expr_cache_read}), SUM({source.expr_cache_write}),"
-            f" SUM({source.expr_total}), COUNT(*), MAX(ts)"
+            f" SUM({source.expr_total}), COUNT(*), MAX(ts), AVG({source.real_col}),"
+            f" SUM(CASE WHEN {source.expr_total} IS NULL THEN 1 ELSE 0 END)"
             f" FROM {source.table} WHERE {where}"
             f" GROUP BY model, provider",
             params,
         ).fetchall()
-        return [
-            TokenRow(
+        out = []
+        for r in rows:
+            unknown = int(r[10] or 0)
+            total = None if unknown else _opt_int(r[6])
+            real_avg = r[9]
+            out.append(TokenRow(
                 source=source.key, label=source.label,
                 model=str(r[0]), provider=str(r[1] or ""),
-                input=int(r[2] or 0), output=int(r[3] or 0),
-                cache_read=int(r[4] or 0), cache_write=int(r[5] or 0),
-                total=int(r[6] or 0), requests=int(r[7] or 0),
+                input=_opt_int(r[2]), output=_opt_int(r[3]),
+                cache_read=_opt_int(r[4]), cache_write=_opt_int(r[5]),
+                total=total, requests=int(r[7] or 0),
                 last_used=int(r[8]) if r[8] is not None else None,
-            )
-            for r in rows
-        ]
+                tokens_real=(total is not None and unknown == 0
+                             and (real_avg is None or float(real_avg) >= 0.999)),
+            ))
+        return out
 
     return _per_source(start_ms, end_ms, query)
 
@@ -209,14 +241,16 @@ def by_source(rows: list[TokenRow]) -> list[TokenRow]:
                 provider="", input=row.input, output=row.output,
                 cache_read=row.cache_read, cache_write=row.cache_write,
                 total=row.total, requests=row.requests, last_used=row.last_used,
+                tokens_real=row.tokens_real,
             )
             continue
-        target.input += row.input
-        target.output += row.output
-        target.cache_read += row.cache_read
-        target.cache_write += row.cache_write
-        target.total += row.total
+        target.input = _sum_opt(target.input, row.input)
+        target.output = _sum_opt(target.output, row.output)
+        target.cache_read = _sum_opt(target.cache_read, row.cache_read)
+        target.cache_write = _sum_opt(target.cache_write, row.cache_write)
+        target.total = _sum_opt(target.total, row.total)
         target.requests += row.requests
+        target.tokens_real = target.tokens_real and row.tokens_real
         if row.last_used and (target.last_used is None or row.last_used > target.last_used):
             target.last_used = row.last_used
     return list(folded.values())
@@ -234,7 +268,7 @@ def entity_rows(kind: str, start_ms: int | None, end_ms: int) -> list[EntityRow]
             f"SELECT COALESCE({name_col}, '(unknown)'), COUNT(*),"
             f" SUM(CASE WHEN lower(COALESCE(status,'')) IN ({ok_list}) THEN 1 ELSE 0 END),"
             f" SUM(CASE WHEN lower(COALESCE(status,'')) IN ({fail_list}) THEN 1 ELSE 0 END),"
-            f" AVG(duration_ms), MAX(ts)"
+            f" AVG(duration_ms), MAX(ts), COUNT(duration_ms)"
             f" FROM {table} WHERE {where} GROUP BY {name_col}",
             params,
         ).fetchall()
@@ -262,17 +296,22 @@ def entity_rows(kind: str, start_ms: int | None, end_ms: int) -> list[EntityRow]
         target.ok += int(r[2] or 0)
         target.fail += int(r[3] or 0)
         target.pending += calls - int(r[2] or 0) - int(r[3] or 0)
-        if r[4] is not None:
-            # Weighted by calls, so a 5-call average does not outweigh 500 calls.
-            weight = target.calls - calls
-            total_ms = (target.avg_ms or 0.0) * weight + float(r[4]) * calls
-            target.avg_ms = total_ms / target.calls if target.calls else None
+        measured = int(r[6] or 0)
+        target.measured_calls += measured
+        if r[4] is not None and measured:
+            # Weighted by measured calls only, so a NULL duration is not a
+            # zero-millisecond call in the denominator.
+            weight = target.measured_calls - measured
+            total_ms = (target.avg_ms or 0.0) * weight + float(r[4]) * measured
+            target.avg_ms = total_ms / target.measured_calls
         if r[5] is not None:
             ts = int(r[5])
             target.last_used = ts if target.last_used is None else max(target.last_used, ts)
 
     for merge_key, row in merged.items():
-        row.name = max(spellings[merge_key].items(), key=lambda kv: kv[1])[0]
+        seen = spellings[merge_key]
+        row.name = max(seen.items(), key=lambda kv: kv[1])[0]
+        row.spellings = (row.name, *(name for name in seen if name != row.name))
     return list(merged.values())
 
 
@@ -289,7 +328,7 @@ def call_rows(start_ms: int | None, end_ms: int, limit: int = 300) -> list[CallR
         return [
             CallRow(ts=int(r[0]), source=source.key, label=source.label,
                     model=str(r[1]), project=str(r[2]), session=str(r[3]),
-                    total=int(r[4] or 0))
+                    total=_opt_int(r[4]))
             for r in rows
         ]
 
@@ -346,20 +385,46 @@ def kpis(start_ms: int | None, end_ms: int, _delta: bool = True) -> Kpis:
     def query(conn, source, where, params):
         row = conn.execute(
             f"SELECT SUM({source.expr_total}), COUNT(*),"
-            f" COUNT(DISTINCT session_id),"
-            f" COUNT(DISTINCT date(ts/1000,'unixepoch','localtime'))"
+            f" COUNT(DISTINCT session_id), AVG({source.real_col}),"
+            f" SUM(CASE WHEN {source.expr_total} IS NULL THEN 1 ELSE 0 END)"
             f" FROM {source.table} WHERE {where}",
             params,
         ).fetchone()
-        return [(source.key, row)]
+        dates = conn.execute(
+            f"SELECT DISTINCT date(ts/1000,'unixepoch','localtime')"
+            f" FROM {source.table} WHERE {where}",
+            params,
+        ).fetchall()
+        return [(source.key, row, {str(r[0]) for r in dates})]
 
-    for key, row in _per_source(start_ms, end_ms, query):
-        tokens = int(row[0] or 0)
-        out.tokens += tokens
+    active_dates: set[str] = set()
+    unknown = False
+    seen = False
+    total = 0
+    for key, row, dates in _per_source(start_ms, end_ms, query):
+        seen = True
+        row_calls = int(row[1] or 0)
+        # No calls in this window is a real zero; calls whose token columns are
+        # all NULL are unknown and make the merged total unknown.
+        unknown_row = int(row[4] or 0)
+        tokens = (None if unknown_row
+                  else (0 if row_calls == 0 else _opt_int(row[0])))
+        if tokens is None:
+            unknown = True
+        else:
+            total += tokens
         out.per_source[key] = tokens
-        out.calls += int(row[1] or 0)
+        out.calls += row_calls
         out.sessions += int(row[2] or 0)
-        out.active_days = max(out.active_days, int(row[3] or 0))
+        active_dates |= dates
+        out.tokens_real = out.tokens_real and (
+            tokens is not None
+            and (row[3] is None or float(row[3]) >= 0.999))
+    out.tokens = None if not seen or unknown else total
+    # Active days are the union of the days any tracker saw a call, not the
+    # busiest single tracker's count: two trackers used on different days are
+    # two active days.
+    out.active_days = len(active_dates)
 
     # The delta compares against the window of the same length immediately
     # before this one. "All time" has nothing before it, so it reports no delta
@@ -382,8 +447,33 @@ def now_ms() -> int:
 # --- detail screens ---------------------------------------------------------
 
 def _model_in(names: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
-    """`model IN (?,?)` for every spelling a merged row stands for."""
-    return f"model IN ({','.join('?' for _ in names)})", names
+    """`model IN (?,?)` for every spelling a merged row stands for.
+
+    ``(unknown)`` is the display label for SQL NULL, not a model named that;
+    the detail has to ask for ``model IS NULL`` or it lists nothing.
+    """
+    clauses = []
+    params = []
+    for name in names:
+        if name == "(unknown)":
+            clauses.append("model IS NULL")
+        else:
+            clauses.append("model = ?")
+            params.append(name)
+    return f"({' OR '.join(clauses)})", tuple(params)
+
+
+def _entity_in(name_col: str, names: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
+    """The same NULL-aware match for a skill or tool name column."""
+    clauses = []
+    params = []
+    for name in names:
+        if name == "(unknown)":
+            clauses.append(f"{name_col} IS NULL")
+        else:
+            clauses.append(f"{name_col} = ?")
+            params.append(name)
+    return f"({' OR '.join(clauses)})", tuple(params)
 
 
 def model_calls(source_key: str | None, names: tuple[str, ...], start_ms: int | None,
@@ -420,7 +510,7 @@ def model_calls(source_key: str | None, names: tuple[str, ...], start_ms: int | 
             conn.close()
         out.extend(CallRow(ts=int(r[0]), source=source.key, label=source.label,
                            model=str(r[4] or ""), project=str(r[1]),
-                           session=str(r[2]), total=int(r[3] or 0)) for r in rows)
+                           session=str(r[2]), total=_opt_int(r[3])) for r in rows)
     out.sort(key=lambda r: r.ts, reverse=True)
     return out[:limit]
 
@@ -459,10 +549,16 @@ def model_daily(source_key: str | None, names: tuple[str, ...], start_ms: int | 
     return labels, [totals[label] for label in labels]
 
 
-def entity_calls(kind: str, name: str, start_ms: int | None, end_ms: int,
-                 limit: int = 200) -> list[CallRow]:
-    """Every recorded call of one skill or tool, newest first."""
+def entity_calls(kind: str, names: str | tuple[str, ...], start_ms: int | None,
+                 end_ms: int, limit: int = 200) -> list[CallRow]:
+    """Every recorded call of one skill or tool, newest first.
+
+    ``names`` is every spelling the merged row stands for. Querying only the
+    displayed one made a two-tracker row show half its calls.
+    """
     table, name_col = ENTITY_TABLES[kind]
+    wanted = (names,) if isinstance(names, str) else tuple(names)
+    clause, wanted_params = _entity_in(name_col, wanted)
     where, params = _where(start_ms, end_ms)
     out: list[CallRow] = []
     for source in SOURCES:
@@ -472,10 +568,10 @@ def entity_calls(kind: str, name: str, start_ms: int | None, end_ms: int,
         try:
             rows = conn.execute(
                 f"SELECT ts, COALESCE(project, ''), COALESCE(session_id, ''),"
-                f" COALESCE(status, ''), COALESCE(duration_ms, 0)"
-                f" FROM {table} WHERE {where} AND {name_col} = ?"
+                f" COALESCE(status, ''), duration_ms"
+                f" FROM {table} WHERE {where} AND {clause}"
                 f" ORDER BY ts DESC LIMIT ?",
-                (*params, name, limit),
+                (*params, *wanted_params, limit),
             ).fetchall()
         except sqlite3.Error:
             continue
@@ -483,8 +579,9 @@ def entity_calls(kind: str, name: str, start_ms: int | None, end_ms: int,
             conn.close()
         for r in rows:
             out.append(CallRow(ts=int(r[0]), source=source.key, label=source.label,
-                               model=str(r[3]), project=str(r[1]),
-                               session=str(r[2]), total=int(r[4] or 0)))
+                               model="", project=str(r[1]), session=str(r[2]),
+                               total=None, status=str(r[3]),
+                               duration_ms=_opt_int(r[4])))
     out.sort(key=lambda r: r.ts, reverse=True)
     return out[:limit]
 
@@ -508,13 +605,14 @@ class Timeline:
 class ModelTotal:
     """One model across every tracker that used it."""
     model: str
-    total: int = 0
-    per_source: dict[str, int] = field(default_factory=dict)
+    total: int | None = None
+    per_source: dict[str, int | None] = field(default_factory=dict)
     requests: int = 0
     last_used: int | None = None
     # Every spelling folded into this row, the displayed one first. The detail
     # screen queries by these, so a merged row and its drill-down agree.
     spellings: tuple[str, ...] = ()
+    tokens_real: bool = True
 
 
 HOUR_MS = 3_600_000
@@ -591,14 +689,21 @@ def model_totals(rows: list[TokenRow]) -> list[ModelTotal]:
         key = canonical_model(row.model)
         target = merged.get(key)
         if target is None:
-            target = merged[key] = ModelTotal(model=row.model)
+            target = merged[key] = ModelTotal(model=row.model, total=row.total)
             spellings[key] = {}
-        spellings[key][row.model] = spellings[key].get(row.model, 0) + row.total
-        target.total += row.total
+        else:
+            target.total = _sum_opt(target.total, row.total)
+        weight = row.total or 0
+        spellings[key][row.model] = spellings[key].get(row.model, 0) + weight
         target.requests += row.requests
+        target.tokens_real = target.tokens_real and row.tokens_real
         if row.last_used and (target.last_used is None or row.last_used > target.last_used):
             target.last_used = row.last_used
-        target.per_source[row.source] = target.per_source.get(row.source, 0) + row.total
+        if row.source in target.per_source:
+            target.per_source[row.source] = _sum_opt(
+                target.per_source[row.source], row.total)
+        else:
+            target.per_source[row.source] = row.total
     for key, target in merged.items():
         # The row is the model, not the platform's id for it: a spelling that is
         # itself an alias loses, then a free-route suffix, then token weight.
@@ -613,7 +718,8 @@ def model_totals(rows: list[TokenRow]) -> list[ModelTotal]:
                       if _folded(n) in MODEL_ALIASES), None)
         target.model = alias or raw[0]
         target.spellings = (target.model, *(n for n in raw if n != target.model))
-    return sorted(merged.values(), key=lambda m: m.total, reverse=True)
+    return sorted(merged.values(),
+                  key=lambda m: (m.total is not None, m.total or 0), reverse=True)
 
 
 def collapse_calls(rows: list[CallRow], bucket_ms: int = 60_000) -> list[CallRow]:
@@ -633,7 +739,7 @@ def collapse_calls(rows: list[CallRow], bucket_ms: int = 60_000) -> list[CallRow
             out.append(row)
             continue
         target = out[slot]
-        target.total += row.total
+        target.total = _sum_opt(target.total, row.total)
         target.count += row.count
         target.ts = max(target.ts, row.ts)
     return out
@@ -654,6 +760,8 @@ def model_stats(source_key: str | None, names: tuple[str, ...], start_ms: int | 
 
     where, params = _where(start_ms, end_ms)
     tokens = 0
+    unknown = False
+    seen = False
     calls = 0
     for source in targets:
         conn = _connect(source)
@@ -662,14 +770,23 @@ def model_stats(source_key: str | None, names: tuple[str, ...], start_ms: int | 
         clause, wanted = _model_in(names)
         try:
             row = conn.execute(
-                f"SELECT SUM({source.expr_total}), COUNT(*) FROM {source.table}"
-                f" WHERE {where} AND {clause}",
+                f"SELECT SUM({source.expr_total}), COUNT(*),"
+                f" SUM(CASE WHEN {source.expr_total} IS NULL THEN 1 ELSE 0 END)"
+                f" FROM {source.table} WHERE {where} AND {clause}",
                 (*params, *wanted),
             ).fetchone()
         except sqlite3.Error:
             continue
         finally:
             conn.close()
-        tokens += int(row[0] or 0)
-        calls += int(row[1] or 0)
-    return tokens, calls
+        seen = True
+        row_calls = int(row[1] or 0)
+        calls += row_calls
+        unknown_row = int(row[2] or 0)
+        value = (None if unknown_row
+                 else (0 if row_calls == 0 else _opt_int(row[0])))
+        if value is None:
+            unknown = True
+        else:
+            tokens += value
+    return (None if not seen or unknown else tokens), calls

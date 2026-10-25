@@ -91,11 +91,12 @@ The screen is laid out like the three trackers: the state line (rows, sort, grou
 
 - **Tokens are the unit.** No credits, no dollars: the three trackers report credits, credits and dollars respectively, so one money column would present three units as one.
 - **A missing index is not a zero.** A tracker that is not installed, not synced or built by an older schema is skipped in the merges and reported on the Sources tab — never counted as "used nothing".
+- **A missing token figure is not a zero either.** A source that reports credits but no tokens (qcut's BYOK routes) shows `—` on Sources. In the Tokens and Dashboard merges, a model with any unreported call is `—` too; the board never sums only the known rows and calls the result a total.
 - **ok / fail / pending** come from the status the hosts actually write: `completed` is ok; `error`, `incomplete` and `cancelled` are failures; `running`, `backgrounded` and no status at all are pending, which is not a failure.
 - **One model is one row.** The same model name through three trackers is one total with three columns, because "what did this model cost me" has one answer. Names merge case-insensitively; `g` still shows the per-tracker rows when that is what you want.
 - **Tool names merge case-insensitively** (`Read` in one tracker, `read` in another, one row). `Bash` and `shell` stay apart: whether they are the same tool is a guess this app does not make.
 - **One number, labelled.** Every token figure the board prints is the tracker's own **Usage Total** — the definition each tracker's panels use (cbut: prompt + completion + cache hit; ocut: full prompt + output + the hit re-added; qcut: input + output + cache read). The providers' own API totals are no longer read anywhere; a number that says neither input, output nor cache is always the Usage Total.
-- **One bar, one scale.** Every bar in a table shares its scale, so a 12M tracker and an 81M tracker do not draw the same bar. The percentage beside a bar is its share of the window; the bar itself is scaled to the largest row.
+- **One bar, one scale.** Every bar in a table shares its scale, so a 12M tracker and an 81M tracker do not draw the same bar. The percentage beside a bar is its share of the window. In the ranked tables the bar is scaled to the largest row; Sources uses the window total, which is the same denominator as the percentage it prints.
 - **Cards grow, then the pane scrolls.** A list card takes the height its rows need instead of truncating to a fixed row count; the dashboard pane scrolls once the screen is full, so nothing is silently cut.
 - **Two numbers on one screen count the same calls.** The Sources tab takes its window from the tab, not from "the last N×24 hours", so it agrees with the KPI strip above it.
 - **There is no `a` key.** The trackers use it for "installed but never used", which has no cross-tool meaning here.
@@ -125,7 +126,7 @@ cd all-usage-trackers
 ./install.sh
 ```
 
-`install.sh` is idempotent. It creates `.venv` in the repo and installs `requirements.txt` into it, then symlinks `bin/aut` into `~/.local/bin`, so `git pull` here updates the running install. It refuses to replace a real file at the target; pass `--force` if you really mean it. `AUT_BIN_DIR` moves the symlink target. The last step runs `aut json --days 7` and reports whether the three sources answered.
+`install.sh` is idempotent. It creates `.venv` in the repo and installs `requirements.txt` into it, then symlinks `bin/aut` into `~/.local/bin`, so `git pull` here updates the running install. It refuses to replace a real file at the target; pass `--force` if you really mean it. `AUT_BIN_DIR` moves the symlink target. The last step runs `aut json --days 7` and reports whether any source errored.
 
 If `aut` is not found afterwards, `~/.local/bin` is not on your `PATH`.
 
@@ -146,10 +147,10 @@ aut --help
 
 | Symptom | Cause | What to do |
 | :--- | :--- | :--- |
-| a source shows `missing` | that tracker is not installed, or its index was never built | install it and run its `sync`; `aut sync` does that for you |
+| a source shows `no db` | that tracker is not installed, or its index was never built | install it and run its `sync`; `aut sync` does that for you |
 | a source shows `error` | its `usage.db` no longer matches the columns `aut` reads | see [the contracts file](docs/maintenance/tracker-contracts.md); the adapter is one entry in `scripts/aut_sources.py` |
 | a source shows `idle` | no calls in the last week — not a fault | nothing |
-| a model shows a plausible 0 | the tracker's column exists but stopped being written | check that tracker's own panel first; a zero here is the quiet failure |
+| a model shows `—` | that source reported calls but no token figure (for example a BYOK route that only records credits) | check that tracker's own panel; the board will not turn unknown into 0 |
 | `aut: command not found` | `~/.local/bin` not on `PATH` | add it, or re-run `install.sh` with `AUT_BIN_DIR` |
 | the board will not start, `aut json` works | the venv is gone or Textual is missing | re-run `./install.sh` |
 

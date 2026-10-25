@@ -198,6 +198,37 @@ class TestCbut(AdapterCase):
         conn.close()
         self.assertEqual(self.snapshot("cbut", days=0).status, "idle")
 
+    def test_empty_window_still_reads_idle_from_older_history(self):
+        """A quiet day does not erase the fact that the tracker was used."""
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
+        conn.execute("INSERT INTO model_responses (message_id, session_id, model, provider, prompt_tokens, completion_tokens, provider_total_tokens, credit, ts, project, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     ("m1", "s1", "m", "p", 1, 1, 0, None, self.now - 30 * DAY_MS, "/p", 1))
+        conn.commit()
+        conn.close()
+        snap = self.snapshot("cbut", days=1)
+        self.assertEqual(snap.calls, 0)
+        self.assertEqual(snap.status, "idle")
+
+    def test_custom_end_excludes_calls_after_the_window(self):
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
+        rows = [
+            ("m1", "s1", "old", "p", 5, 5, 0, None, self.now - 3 * DAY_MS, "/p/old", 1),
+            ("m2", "s2", "new", "p", 80, 10, 0, None, self.now, "/p/new", 1),
+        ]
+        conn.executemany(
+            "INSERT INTO model_responses (message_id, session_id, model, provider,"
+            " prompt_tokens, completion_tokens, provider_total_tokens, credit, ts,"
+            " project, usage_available) VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows)
+        conn.commit()
+        conn.close()
+        snap = BY_KEY["cbut"].snapshot(
+            2, self.now, since_ms=self.now - 4 * DAY_MS,
+            end_ms=self.now - 2 * DAY_MS)
+        self.assertEqual(snap.calls, 1)
+        self.assertEqual(snap.tokens, 10)
+        self.assertEqual(snap.last_event_ms, self.now - 3 * DAY_MS)
+        self.assertEqual([name for name, _ in snap.top_models], ["old"])
+
 
 class TestQcut(AdapterCase):
     def test_credits_without_tokens_does_not_print_zero(self):
@@ -226,6 +257,77 @@ class TestQcut(AdapterCase):
         conn.commit()
         conn.close()
         self.assertEqual(self.snapshot("qcut").tokens, 200)
+
+
+class TestUnknownTokens(AdapterCase):
+    """A NULL token column is "not reported", never a zero."""
+
+    def _qcut(self, rows) -> None:
+        conn = _db(self.home, "qoder-cn-usage-tracker", QCUT_DDL)
+        conn.executemany(
+            "INSERT INTO model_calls (message_id, session_id, model, ts, project,"
+            " input_tokens, output_tokens, credits, has_usage)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        conn.commit()
+        conn.close()
+
+    def test_byok_null_tokens_stay_unknown_in_every_aggregate(self):
+        self._qcut([
+            ("m1", "s1", "custom-route", self.now, "/p", None, None, 12.5, 1),
+        ])
+        rows = model.token_rows(0, self.now)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertIsNone(row.total)
+        self.assertIsNone(row.input)
+        self.assertFalse(row.tokens_real)
+
+        folded = model.by_source(rows)[0]
+        self.assertIsNone(folded.total)
+        self.assertFalse(folded.tokens_real)
+
+        merged = model.model_totals(rows)[0]
+        self.assertIsNone(merged.total)
+        self.assertFalse(merged.tokens_real)
+
+        k = model.kpis(0, self.now)
+        self.assertIsNone(k.tokens)
+        self.assertIsNone(k.per_source["qcut"])
+        self.assertFalse(k.tokens_real)
+
+        tokens, calls = model.model_stats(None, ("custom-route",), 0, self.now)
+        self.assertIsNone(tokens)
+        self.assertEqual(calls, 1)
+        self.assertIsNone(model.model_calls(None, ("custom-route",), 0, self.now)[0].total)
+
+    def test_a_mixed_model_is_unknown_not_a_partial_sum(self):
+        self._qcut([
+            ("m1", "s1", "mixed", self.now, "/p", 100, 20, None, 1),
+            ("m2", "s1", "mixed", self.now, "/p", None, None, 5.0, 1),
+        ])
+        rows = model.token_rows(0, self.now)
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0].total)
+        self.assertIsNone(model.by_source(rows)[0].total)
+        self.assertIsNone(model.model_totals(rows)[0].total)
+        self.assertIsNone(model.kpis(0, self.now).tokens)
+
+    def test_missing_cbut_parts_are_unknown_even_with_a_cache_hit(self):
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
+        conn.execute(
+            "INSERT INTO model_responses (message_id, session_id, model, provider,"
+            " prompt_tokens, completion_tokens, credit, ts, project,"
+            " usage_available, prompt_cache_hit_tokens)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ("m1", "s1", "m", "p", 100, None, None, self.now, "/p", 1, 10),
+        )
+        conn.commit()
+        conn.close()
+        row = model.token_rows(0, self.now)[0]
+        self.assertIsNone(row.total)
+        self.assertIsNone(self.snapshot("cbut").tokens)
 
 
 class TestOcut(AdapterCase):
@@ -535,6 +637,83 @@ class TestAggregation(AdapterCase):
         # Only today's row is in the window; yesterday's is the comparison.
         self.assertEqual(k.tokens, 100)
         self.assertEqual(k.prev_tokens, 300)
+
+    def test_active_days_are_the_union_of_the_trackers(self):
+        cbut = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
+        cbut.execute(
+            "INSERT INTO model_responses (message_id, session_id, model, provider,"
+            " prompt_tokens, completion_tokens, ts, project, usage_available)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            ("m1", "s1", "m", "p", 100, 0, self.now, "/p", 1),
+        )
+        cbut.commit()
+        cbut.close()
+        ocut = _db(self.home, "opencode-usage-tracker", OCUT_DDL)
+        ocut.execute(
+            "INSERT INTO model_calls (call_id, session_id, model, prompt_tokens,"
+            " completion_tokens, ts, project, directory, usage_available)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            ("c1", "s2", "m", 10, 0, self.now - DAY_MS, "h", "/p", 1),
+        )
+        ocut.commit()
+        ocut.close()
+        self.assertEqual(model.kpis(0, self.now).active_days, 2)
+
+    def test_average_duration_ignores_null_measurements(self):
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True)
+        conn.executemany(
+            "INSERT INTO skill_usage (call_id, skill, session_id, project, ts,"
+            " status, duration_ms) VALUES (?,?,?,?,?,?,?)",
+            [("k1", "x", "s", "/p", self.now, "completed", 1000),
+             ("k2", "x", "s", "/p", self.now, "completed", None),
+             ("k3", "unmeasured", "s", "/p", self.now, "completed", None)],
+        )
+        conn.commit()
+        conn.close()
+        rows = {row.name: row for row in model.entity_rows("skills", 0, self.now)}
+        self.assertAlmostEqual(rows["x"].avg_ms, 1000)
+        self.assertEqual(rows["x"].measured_calls, 1)
+        self.assertIsNone(rows["unmeasured"].avg_ms)
+        self.assertEqual(rows["unmeasured"].measured_calls, 0)
+
+    def test_unknown_model_drilldown_matches_sql_null(self):
+        conn = _db(self.home, "qoder-cn-usage-tracker", QCUT_DDL)
+        conn.execute(
+            "INSERT INTO model_calls (message_id, session_id, model, ts, project,"
+            " input_tokens, output_tokens, credits, has_usage)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            ("m1", "s1", None, self.now, "/p", 50, 0, None, 1),
+        )
+        conn.commit()
+        conn.close()
+        row = model.token_rows(0, self.now)[0]
+        self.assertEqual(row.model, "(unknown)")
+        self.assertEqual(row.total, 50)
+        self.assertEqual(model.model_stats(None, ("(unknown)",), 0, self.now),
+                         (50, 1))
+        calls = model.model_calls(None, ("(unknown)",), 0, self.now)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].total, 50)
+
+    def test_entity_drilldown_reads_every_spelling(self):
+        self._two_sources()
+        row = next(r for r in model.entity_rows("tools", 0, self.now)
+                   if r.name.casefold() == "read")
+        self.assertEqual({name.casefold() for name in row.spellings}, {"read"})
+        calls = model.entity_calls("tools", row.spellings, 0, self.now)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual({call.source for call in calls}, {"cbut", "ocut"})
+        self.assertTrue(all(call.total is None and call.duration_ms is not None
+                            for call in calls))
+
+    def test_entity_detail_keeps_status_and_duration_apart(self):
+        self._two_sources()
+        row = model.entity_rows("skills", 0, self.now)[0]
+        calls = model.entity_calls("skills", row.spellings, 0, self.now)
+        self.assertEqual({call.status for call in calls},
+                         {"completed", "error"})
+        self.assertEqual(sorted(call.duration_ms for call in calls),
+                         [1000, 2000, 3000])
 
     def test_day_labels_are_capped(self):
         labels = model.day_labels(0, self.now, max_days=30)

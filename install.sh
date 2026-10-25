@@ -77,7 +77,16 @@ echo "  $DST -> $REPO_DIR/bin/aut"
 # --- 3. report what it found ------------------------------------------------
 echo
 echo "==> aut json --days 7"
-"$DST" json --days 7 >/dev/null && echo "  ok" || echo "  (a source reported a problem — run aut json to see it)"
+JSON="$(mktemp)"
+if "$DST" json --days 7 >"$JSON" 2>/dev/null \
+        && "$VENV/bin/python" -c \
+        'import json, sys; d = json.load(open(sys.argv[1])); sys.exit(1 if any(s["status"] == "error" for s in d["sources"]) else 0)' \
+        "$JSON"; then
+    echo "  ok"
+else
+    echo "  (a source reported a problem — run aut json to see it)"
+fi
+rm -f "$JSON"
 
 cat <<EOF
 

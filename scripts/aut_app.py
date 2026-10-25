@@ -95,7 +95,7 @@ HELP = """
 
   The caption above each table names the sort (s) and, on Tokens, the
   grouping (g) — so neither has to be pressed to find out what it did.
-  Dashboard: up/down picks a model; enter opens Tokens filtered by it.
+  Dashboard is a read-only summary: it has no selection and no enter.
   Sources: enter opens that tracker's own TUI; q there returns to aut.
   There is no 'a' key: the trackers use it for "installed but never used",
   which has no cross-tool equivalent here.
@@ -139,15 +139,17 @@ def _share_cell(value: int, total: int, key: str) -> Text:
     return out
 
 
-def _source_split(per: dict[str, int], total: int) -> Text:
+def _source_split(per: dict[str, int | None], total: int | None) -> Text:
     """One line naming each tracker's share of a merged total."""
     out = Text()
-    for key, value in sorted(per.items(), key=lambda kv: kv[1], reverse=True):
+    for key, value in sorted(per.items(), key=lambda kv: kv[1] or 0,
+                             reverse=True):
         label = BY_KEY[key].label if key in BY_KEY else key
         if out:
             out.append("   ")
         out.append(f"{label} ", style=SOURCE_STYLE.get(key, ""))
-        out.append(f"{fmt_tokens(value)} {pct(value, total)}", style="dim")
+        share = pct(value, total) if value is not None and total is not None else "—"
+        out.append(f"{fmt_tokens(value)} {share}", style="dim")
     return out
 
 
@@ -169,9 +171,9 @@ def _avg(ms: float | None) -> str:
     return f"{ms:.0f}ms"
 
 
-def _delta(now: int, prev: int | None) -> Text:
+def _delta(now: int | None, prev: int | None) -> Text:
     """A change against the previous window, or nothing when there is no base."""
-    if prev is None:
+    if now is None or prev is None:
         return Text("—", style="dim")
     if prev <= 0:
         return Text("new", style="green")
@@ -360,7 +362,11 @@ class TablePane(Pane):
             rows = [r for r in rows if self.matches(r, self.needle)]
         key = self.sort_key()
         if key:
-            rows.sort(key=lambda r: (getattr(r, key) is None, getattr(r, key)), reverse=True)
+            # A NULL token total is unknown, not the smallest number; put it
+            # after the known rows without asking Python to compare None.
+            rows.sort(key=lambda r: (getattr(r, key) is not None,
+                                     getattr(r, key) if getattr(r, key) is not None else 0),
+                      reverse=True)
         self._rows = rows
         self._before_render(rows)
 
@@ -515,7 +521,9 @@ class TokensPane(TablePane):
         self.reload(self.window)
 
     def extra_note(self) -> str:
-        total = sum(r.total for r in self._rows)
+        known = [r.total for r in self._rows if r.total is not None]
+        total = (None if any(r.total is None for r in self._rows)
+                 else (sum(known) if known else None))
         label = self.MODE_LABELS[self.mode]
         if self.size.width and self.size.width < 100:
             # The long label is what wraps the caption at 80 columns; the mode
@@ -594,7 +602,9 @@ class EntityPane(TablePane):
     def open_selected(self) -> None:
         row = self.selected()
         if row is not None:
-            self.app.push_screen(EntityScreen(row.name, self.kind, self.window, row.calls))
+            self.app.push_screen(EntityScreen(
+                row.name, self.kind, self.window, row.calls,
+                row.spellings or (row.name,)))
 
 
 class UsagePane(TablePane):
@@ -756,7 +766,7 @@ class DashboardPane(Pane):
 
     def _kpi_text(self, width: int = 120) -> Text:
         k = self._kpis
-        total = k.tokens or 0
+        total = k.tokens
         out = Text("Window\n", style="bold")
         out.append(fmt_tokens(total), style="bold")
         out.append(" usage total   ")
@@ -777,18 +787,24 @@ class DashboardPane(Pane):
         if bits:
             out.append("   ·   " + " · ".join(bits))
         out.append("\n")
+        if total is None:
+            out.append("token usage not reported in this window", style="dim")
+            return out
         if total <= 0:
             out.append("nothing recorded in this window", style="dim")
             return out
         first = True
         for source in SOURCES:
-            value = k.per_source.get(source.key)
-            if value is None:
+            if source.key not in k.per_source:
                 continue
+            value = k.per_source[source.key]
             if not first:
                 out.append("   ")
             first = False
             out.append(f"{source.label} ", style=SOURCE_STYLE.get(source.key, ""))
+            if value is None:
+                out.append(f"{'—':>7}")
+                continue
             if width >= 110:
                 out.append_text(share_bar(value, total, width=8,
                                           style=SOURCE_STYLE.get(source.key, "cyan")))
@@ -835,7 +851,10 @@ class DashboardPane(Pane):
         models_w = max(24, (models_card.size.width or fallback) - 1)
         skills_w = max(24, (skills_card.size.width or fallback) - 1)
 
-        total = sum(m.total for m in self._models)
+        known = [m.total for m in self._models if m.total is not None]
+        total = (None if any(m.total is None for m in self._models)
+                 else (sum(known) if known else None))
+        scale = max(known) if known else 0
         numbers = [fmt_tokens(m.total) for m in self._models]
         num_w = max([len(n) for n in numbers] + [7])
         name_w, bar, share, head = self._row_widths(models_w, num_w, self.ORIGIN_W, 0)
@@ -852,13 +871,16 @@ class DashboardPane(Pane):
                 line.append(f" {origin:<{self.ORIGIN_W}}",
                             style=SOURCE_STYLE.get(origin, "dim"))
             line.append(f" {number:>{num_w}}")
-            if bar:
+            if bar and item.total is not None and scale:
                 line.append(" ")
-                line.append_text(share_bar(item.total, self._models[0].total,
+                line.append_text(share_bar(item.total, scale,
                                            width=self.BAR_W,
                                            style=self._model_style(item)))
             if share:
-                line.append(f" {pct(item.total, total):>{self.PCT_W}}")
+                share_text = (pct(item.total, total)
+                              if item.total is not None and total is not None
+                              else "—")
+                line.append(f" {share_text:>{self.PCT_W}}")
             line.append("\n")
             models.append_text(line)
 
@@ -969,26 +991,31 @@ class SourcesPane(Pane):
             for index, snap in enumerate(self._snaps):
                 if snap.key != only:
                     continue
-                self._snaps[index] = BY_KEY[only].snapshot(days, since_ms=start)
+                self._snaps[index] = BY_KEY[only].snapshot(
+                    days, since_ms=start, end_ms=end)
                 # The trend is always a week, even when the numbers are today's:
-                # a one-bar trend is not a trend.
-                self._trend[only] = BY_KEY[only].snapshot(7).buckets
+                # a one-bar trend is not a trend. It ends with the selected
+                # window, so a historical view shows that week, not this one.
+                self._trend[only] = BY_KEY[only].snapshot(7, end_ms=end).buckets
                 self._update_row(self._snaps[index])
                 break
         else:
-            self._snaps = snapshots(days, since_ms=start)
-            self._trend = {s.key: s.buckets for s in snapshots(7)}
+            self._snaps = snapshots(days, since_ms=start, end_ms=end)
+            self._trend = {s.key: s.buckets for s in snapshots(7, end_ms=end)}
             self._fill()
         self._note()
 
     def _row(self, snap) -> dict[str, object]:
-        total = sum(s.tokens or 0 for s in self._snaps)
+        known = [s.tokens for s in self._snaps if s.tokens is not None]
+        unknown = any(s.tokens is None and s.calls > 0 for s in self._snaps)
+        total = None if unknown else (sum(known) if known else 0)
         live = snap.status in ("ok", "idle")
         state = {"ok": "ok", "idle": "idle", "missing": "no db"}.get(snap.status, "error")
         return {
             "source": Text(snap.label, style=SOURCE_STYLE.get(snap.key, "")),
             "tokens": fmt_tokens(snap.tokens),
-            "share": (Text("—", style="dim") if not snap.tokens
+            "share": (Text("—", style="dim")
+                      if not snap.tokens or total is None
                       else _share_cell(snap.tokens, total, snap.key)),
             "sessions": str(snap.sessions) if live else Text("—", style="dim"),
             "7d trend": sparkline(self._trend.get(snap.key, snap.buckets)),
@@ -1045,18 +1072,31 @@ class CallsTable(Vertical):
     """
 
     COLUMNS = ("when", "source", "model", "tokens", "project", "session")
+    ENTITY_COLUMNS = ("when", "source", "status", "duration", "project",
+                      "session")
 
-    def __init__(self, rows) -> None:
+    def __init__(self, rows, entity: bool = False) -> None:
         super().__init__()
         self._rows = rows
+        self._entity = entity
 
     def compose(self) -> ComposeResult:
         yield Table(id="calls", cursor_type="row", zebra_stripes=True)
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
-        table.add_columns(*self.COLUMNS)
+        table.add_columns(*(self.ENTITY_COLUMNS if self._entity else self.COLUMNS))
         for row in self._rows:
+            if self._entity:
+                table.add_row(
+                    fmt_age(row.ts),
+                    Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
+                    row.status or "—",
+                    _avg(row.duration_ms),
+                    _project(row.project, 44),
+                    row.session[:8] or "—",
+                )
+                continue
             table.add_row(
                 fmt_age(row.ts),
                 Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
@@ -1109,7 +1149,7 @@ class ModelScreen(Screen[None]):
             # Per-source totals from the aggregate, not from the 200 listed
             # rows: a split that adds up to 40M beside an 81M total is a lie
             # the reader cannot see.
-            per: dict[str, int] = {}
+            per: dict[str, int | None] = {}
             for source in SOURCES:
                 value, seen = model.model_stats(source.key, names, start, end)
                 if seen:
@@ -1130,16 +1170,18 @@ class EntityScreen(Screen[None]):
     """
 
     def __init__(self, entity_name: str, kind: str, window,
-                 total_calls: int | None = None) -> None:
+                 total_calls: int | None = None,
+                 names: tuple[str, ...] | None = None) -> None:
         super().__init__()
         self.entity_name = entity_name
         self.kind = kind
         self.window = window
         self.total_calls = total_calls
+        self.names = names or (entity_name,)
 
     def compose(self) -> ComposeResult:
         start, end = bounds_of(self.window, model.now_ms())
-        rows = model.entity_calls(self.kind, self.entity_name, start, end)
+        rows = model.entity_calls(self.kind, self.names, start, end)
         count = self.total_calls if self.total_calls is not None else len(rows)
         head = Text()
         head.append(f"{self.entity_name}\n", style="bold")
@@ -1148,7 +1190,7 @@ class EntityScreen(Screen[None]):
             head.append(f"  ·  newest {len(rows)} below", style="dim")
         head.append("\n")
         yield Static(head, id="head")
-        yield CallsTable(rows)
+        yield CallsTable(rows, entity=True)
 
 
 class AutApp(App[None]):

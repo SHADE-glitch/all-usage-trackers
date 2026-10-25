@@ -27,8 +27,6 @@ def _as_dict(snap: Snapshot) -> dict:
         "note": snap.note,
         "tokens": snap.tokens,
         "tokens_real": snap.tokens_real,
-        "cost": snap.cost,
-        "cost_unit": snap.cost_unit,
         "sessions": snap.sessions,
         "calls": snap.calls,
         "buckets": snap.buckets,
@@ -55,12 +53,16 @@ def _window(days: int) -> tuple[int | None, int]:
 
 
 def cmd_json(args: argparse.Namespace) -> int:
-    start, _end = _window(args.days)
+    start, end = _window(args.days)
     payload = {
         "generated_at_ms": int(time.time() * 1000),
         "window_days": args.days,
         "window_start_ms": start,
-        "sources": [_as_dict(snap) for snap in snapshots(args.days, since_ms=start)],
+        "window_end_ms": end,
+        "sources": [
+            _as_dict(snap)
+            for snap in snapshots(args.days, since_ms=start, end_ms=end)
+        ],
     }
     print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0
