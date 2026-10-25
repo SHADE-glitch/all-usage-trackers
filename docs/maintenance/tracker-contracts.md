@@ -58,6 +58,7 @@ other — but they can drift from the tracker they claim to describe.
 | Upstream change | What `aut` shows |
 |---|---|
 | table or column renamed / dropped | that source's `error` badge — the SQL raises, the exception is caught per source |
+| a column only the merges read is dropped (`provider`, `status`, `duration_ms`) | the same badge: `Source` prepares one SELECT naming the merge columns at open, and `aut_model` records a failed merge query per source, so a tab cannot be silently empty beside an `ok` row |
 | index file missing or never built | `missing` — **not** a zero |
 | no calls in a week | `idle` — deliberately a different word from `broken` |
 | column still present but no longer written | a plausible **0** — the quiet case; only an L1 check against a copied index catches it |

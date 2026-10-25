@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import shutil
 import subprocess
 import sys
@@ -32,9 +33,9 @@ from textual.widgets import (Button, DataTable, Footer, Input, Select, Static,
 import aut_model as model
 from aut_chart import pct, share_bar
 from aut_db import DAY_MS, fmt_age, fmt_tokens, sparkline
-from aut_picker import (CustomWindow, DateRangeModal, RANGE_LABELS, bounds_of,
-                        window_label)
+from aut_picker import DateRangeModal
 from aut_sources import BY_KEY, SOURCES, snapshots
+from aut_windows import CustomWindow, RANGE_LABELS, bounds_of, window_label
 
 # Per-tab default window, the family's rule: the summary tabs open on today, the
 # entity tabs on the week.
@@ -113,6 +114,30 @@ def _clip(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _clean(value: object) -> str:
+    """A tracker's string, ready to display: control codes become spaces.
+
+    Every name on this screen was written by another program, so it is input,
+    not a label. An ESC that reaches the terminal is an escape sequence, and a
+    model name is never supposed to move the cursor; a newline is not a line
+    break in a one-line cell either.
+    """
+    return _CONTROL.sub(" ", str(value))
+
+
+def _cell(value: object) -> Text:
+    """A tracker's string as a literal table cell.
+
+    Textual parses a `str` cell as Rich markup, so a model called
+    `claude[1m]` would raise `MarkupError` inside the renderer and take the
+    screen with it. A `Text` built from a plain string is never parsed.
+    """
+    return Text(_clean(value))
+
+
 def _project(path: str, width: int = 36) -> Text:
     """A project path as one table cell.
 
@@ -120,6 +145,7 @@ def _project(path: str, width: int = 36) -> Text:
     says nothing. The path is shown relative to home, and a bare home is dimmed
     so it reads as "no project" rather than as a name.
     """
+    path = _clean(path)
     if not path:
         return Text("—", style="dim")
     home = str(Path.home())
@@ -474,7 +500,8 @@ class TokensPane(TablePane):
 
     def fetch(self, window):
         start, end = bounds_of(window, model.now_ms())
-        rows = model.token_rows(start, end)
+        with model.read_session():
+            rows = model.token_rows(start, end)
         if self.mode == "model":
             return model.model_totals(rows)
         if self.mode == "source":
@@ -484,7 +511,7 @@ class TokensPane(TablePane):
     def cells(self, row) -> dict[str, object]:
         if isinstance(row, model.ModelTotal):
             return {
-                "model": row.model,
+                "model": _cell(row.model),
                 "usage total": f"{fmt_tokens(row.total):>7}",
                 "cbut": self._per(row, "cbut"),
                 "ocut": self._per(row, "ocut"),
@@ -494,8 +521,8 @@ class TokensPane(TablePane):
             }
         return {
             "source": Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
-            "model": row.model,
-            "provider": row.provider or Text("—", style="dim"),
+            "model": _cell(row.model),
+            "provider": _cell(row.provider) if row.provider else Text("—", style="dim"),
             "input": f"{fmt_tokens(row.input):>8}",
             "output": f"{fmt_tokens(row.output):>8}",
             "cache r": f"{fmt_tokens(row.cache_read):>8}",
@@ -564,7 +591,8 @@ class EntityPane(TablePane):
 
     def fetch(self, window):
         start, end = bounds_of(window, model.now_ms())
-        return model.entity_rows(self.kind, start, end)
+        with model.read_session():
+            return model.entity_rows(self.kind, start, end)
 
     def _before_render(self, rows) -> None:
         self._total_calls = sum(r.calls for r in rows)
@@ -583,7 +611,7 @@ class EntityPane(TablePane):
         calls.append_text(share_bar(row.calls, self._max_calls, width=8))
         calls.append(f" {pct(row.calls, self._total_calls):>3}")
         return {
-            "name": row.name,
+            "name": _cell(row.name),
             "calls": calls,
             "cbut": per("cbut"),
             "ocut": per("ocut"),
@@ -621,7 +649,8 @@ class UsagePane(TablePane):
 
     def fetch(self, window):
         start, end = bounds_of(window, model.now_ms())
-        rows = model.call_rows(start, end)
+        with model.read_session():
+            rows = model.call_rows(start, end)
         self._raw = len(rows)
         # Collapsing is a time-order courtesy: "the biggest calls" has to stay
         # one row per call or the ranking stops being a ranking.
@@ -637,10 +666,10 @@ class UsagePane(TablePane):
         return {
             "when": fmt_age(row.ts),
             "source": Text(row.label, style=SOURCE_STYLE.get(row.source, "")),
-            "model": row.model or Text("—", style="dim"),
+            "model": _cell(row.model) if row.model else Text("—", style="dim"),
             "usage total": tokens,
             "project": _project(row.project, self.COLUMN_WIDTHS["project"]),
-            "session": row.session[:8] or Text("—", style="dim"),
+            "session": _cell(row.session[:8]) if row.session else Text("—", style="dim"),
         }
 
     def extra_note(self) -> str:
@@ -702,12 +731,14 @@ class DashboardPane(Pane):
     def reload(self, window) -> None:
         self.window = window
         start, end = bounds_of(window, model.now_ms())
-        self._kpis = model.kpis(start, end)
-        self._models = model.model_totals(model.token_rows(start, end))
-        self._skills = sorted(model.entity_rows("skills", start, end),
-                              key=lambda r: (r.calls, r.last_used or 0), reverse=True)
-        # One row, for the age in the caption; the list itself is gone.
-        self._recent = model.call_rows(start, end, limit=1)
+        # One snapshot for the whole card: four questions, one moment.
+        with model.read_session():
+            self._kpis = model.kpis(start, end)
+            self._models = model.model_totals(model.token_rows(start, end))
+            self._skills = sorted(model.entity_rows("skills", start, end),
+                                  key=lambda r: (r.calls, r.last_used or 0), reverse=True)
+            # One row, for the age in the caption; the list itself is gone.
+            self._recent = model.call_rows(start, end, limit=1)
         self._paint()
 
     # -- drawing ------------------------------------------------------------
@@ -1010,7 +1041,11 @@ class SourcesPane(Pane):
         unknown = any(s.tokens is None and s.calls > 0 for s in self._snaps)
         total = None if unknown else (sum(known) if known else 0)
         live = snap.status in ("ok", "idle")
-        state = {"ok": "ok", "idle": "idle", "missing": "no db"}.get(snap.status, "error")
+        # A merge query that cannot run is this source's problem even when its
+        # own snapshot reads fine: the tabs it feeds would be silently empty.
+        drift = model.source_errors().get(snap.key)
+        state = ("error" if drift else
+                 {"ok": "ok", "idle": "idle", "missing": "no db"}.get(snap.status, "error"))
         return {
             "source": Text(snap.label, style=SOURCE_STYLE.get(snap.key, "")),
             "tokens": fmt_tokens(snap.tokens),
@@ -1045,13 +1080,17 @@ class SourcesPane(Pane):
                 return
 
     def _note(self) -> None:
-        problems = [f"{s.label}: {s.note}" for s in self._snaps
-                    if s.status in ("missing", "error") or not s.tokens_real]
+        drift = model.source_errors()
+        problems = [f"{s.label}: {drift.get(s.key, s.note)}" for s in self._snaps
+                    if s.key in drift or s.status in ("missing", "error")
+                    or not s.tokens_real]
         text = (f"{len(self._snaps)} trackers · enter opens one in its own TUI "
                 "· q there returns here")
         if problems:
             text += "\n" + " · ".join(problems)
-        self.query_one("#note", Static).update(text)
+        # Text, not str: a note names an index path, and a path is a string this
+        # program did not write — Static would parse it as markup.
+        self.query_one("#note", Static).update(Text(text))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         self.open_selected()
@@ -1128,9 +1167,20 @@ class ModelScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         start, end = bounds_of(self.window, model.now_ms())
         names = self.model_names
-        calls = model.model_calls(self.source, names, start, end)
-        labels, series = model.model_daily(self.source, names, start, end)
-        total, count = model.model_stats(self.source, names, start, end)
+        # The header, the split and the rows are one moment, not three.
+        with model.read_session():
+            calls = model.model_calls(self.source, names, start, end)
+            labels, series = model.model_daily(self.source, names, start, end)
+            total, count = model.model_stats(self.source, names, start, end)
+            # Per-source totals from the aggregate, not from the 200 listed
+            # rows: a split that adds up to 40M beside an 81M total is a lie
+            # the reader cannot see. Read inside the same snapshot.
+            per: dict[str, int | None] = {}
+            if self.source is None:
+                for source in SOURCES:
+                    value, seen = model.model_stats(source.key, names, start, end)
+                    if seen:
+                        per[source.key] = value
         head = Text()
         head.append(f"{self.model_name}\n", style="bold")
         if len(names) > 1:
@@ -1146,14 +1196,6 @@ class ModelScreen(Screen[None]):
             head.append(f"  ·  newest {len(calls)} below", style="dim")
         head.append("\n")
         if self.source is None:
-            # Per-source totals from the aggregate, not from the 200 listed
-            # rows: a split that adds up to 40M beside an 81M total is a lie
-            # the reader cannot see.
-            per: dict[str, int | None] = {}
-            for source in SOURCES:
-                value, seen = model.model_stats(source.key, names, start, end)
-                if seen:
-                    per[source.key] = value
             head.append_text(_source_split(per, total))
             head.append("\n")
         else:
@@ -1181,7 +1223,8 @@ class EntityScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         start, end = bounds_of(self.window, model.now_ms())
-        rows = model.entity_calls(self.kind, self.names, start, end)
+        with model.read_session():
+            rows = model.entity_calls(self.kind, self.names, start, end)
         count = self.total_calls if self.total_calls is not None else len(rows)
         head = Text()
         head.append(f"{self.entity_name}\n", style="bold")
@@ -1424,9 +1467,10 @@ class AutApp(App[None]):
                 self._update_bar(self.windows.get(self.pane().TAB_KEY, "1d"))
                 code, tail = await self._run_sync(source)
                 if code != 0:
+                    # The tail is the child's own output, so it is not markup.
                     self.notify(f"{source.binary} sync exited {code}"
                                 + (f": {tail}" if tail else ""),
-                                severity="warning", timeout=8)
+                                severity="warning", timeout=8, markup=False)
         finally:
             self._syncing = False
             self._sync_step = ""

@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
@@ -22,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import aut_db  # noqa: E402
 import aut_model as model  # noqa: E402
-from aut_picker import bounds_of  # noqa: E402
+from aut_windows import bounds_of  # noqa: E402
 from aut_sources import BY_KEY, Snapshot  # noqa: E402
 from datetime import date  # noqa: E402
 
@@ -564,7 +565,7 @@ class TestAggregation(AdapterCase):
                          model.canonical_model("qwen3.8-flash"))
 
     def test_timeline_picks_a_unit_from_the_window(self):
-        from aut_picker import bounds_of
+        from aut_windows import bounds_of
 
         self._two_sources()
         start, end = bounds_of("1d", self.now)
@@ -984,7 +985,7 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_picker_returns_a_custom_window(self):
         from aut_app import AutApp
-        from aut_picker import CustomWindow
+        from aut_windows import CustomWindow
 
         app = AutApp()
         async with app.run_test(size=(140, 40)) as pilot:
@@ -1120,6 +1121,30 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([type(s).__name__ for s in app.screen_stack], ["Screen"])
 
 
+    async def test_a_hostile_model_name_renders_instead_of_raising(self):
+        """A name is data, not markup: Textual parses a str cell as Rich markup."""
+        from aut_app import AutApp
+
+        conn = _db(Path(self._tmp.name), "codebuddy-usage-tracker", CBUT_DDL)
+        now = int(time.time() * 1000)
+        conn.execute(
+            "INSERT INTO model_responses (message_id, session_id, model, provider,"
+            " prompt_tokens, completion_tokens, ts, project, usage_available)"
+            " VALUES ('m1', 's1', ?, 'p', 10, 2, ?, '/p', 1)",
+            ("bad[/red]", now),
+        )
+        conn.commit()
+        conn.close()
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("4")
+            await pilot.pause()
+            table = app.pane().query_one(DataTable)
+            self.assertEqual(table.row_count, 1)
+            shown = [getattr(c, "plain", str(c)) for c in table.get_row_at(0)]
+            self.assertIn("bad[/red]", " ".join(shown))
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -1150,3 +1175,89 @@ class TestUsageCollapse(unittest.TestCase):
         self.assertEqual(rows[0].count, 1)
         self.assertEqual(rows[1].count, 2)
         self.assertEqual(rows[1].total, 15)
+
+
+class TestHardening(unittest.TestCase):
+    """The four failures the audit found behind a screen that looked fine."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name)
+        self._env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        model._ERRORS.clear()
+        self.addCleanup(model._ERRORS.clear)
+        self.now = int(time.time() * 1000)
+
+    def test_the_json_report_runs_without_textual(self):
+        """`aut json` is documented as pure standard library, so prove it.
+
+        A child process is the only honest test: this one already imported
+        Textual for the board tests, and an in-process import would pass
+        whether or not the headless path still pulls it in.
+        """
+        scripts = Path(__file__).resolve().parent.parent
+        code = (
+            "import sys, io, json, contextlib\n"
+            "sys.modules['textual'] = None\n"
+            "import aut_report\n"
+            "buf = io.StringIO()\n"
+            "with contextlib.redirect_stdout(buf):\n"
+            "    rc = aut_report.main(['json', '--days', '1'])\n"
+            "print(rc, len(json.loads(buf.getvalue())['sources']))\n"
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", code], cwd=str(scripts),
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.split(), ["0", "3"], out.stderr)
+
+    def test_a_hostile_name_is_literal_text_not_markup(self):
+        from aut_app import _cell
+
+        self.assertEqual(_cell("claude[1m]").plain, "claude[1m]")
+        self.assertEqual(_cell("bad[/red]").plain, "bad[/red]")
+        # An ESC is a terminal escape sequence, not part of a name.
+        self.assertEqual(_cell("a\x1b]52;c;eA==\x07b").plain, "a ]52;c;eA== b")
+
+    def test_a_source_missing_a_merge_column_is_an_error_not_an_ok(self):
+        # `provider` is read by aut_model only; the source's own snapshot never
+        # touched it, so this used to read "ok" with an empty Tokens tab.
+        _db(self.home, "codebuddy-usage-tracker", CBUT_DDL.replace("provider TEXT,", ""))
+        snap = BY_KEY["cbut"].snapshot(1, self.now)
+        self.assertEqual(snap.status, "error")
+        self.assertIn("provider", snap.note)
+
+    def test_a_missing_entity_column_is_reported(self):
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
+        conn.executescript(CBUT_ENTITIES.replace("status TEXT,", ""))
+        conn.close()
+        self.assertEqual(model.entity_rows("tools", None, self.now), [])
+        self.assertIn("cbut", model.source_errors())
+
+    def test_one_reload_opens_one_connection_per_source(self):
+        """A tab's four questions must come from one read transaction."""
+        _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True).close()
+        opened: list[Path] = []
+        real = aut_db.open_ro
+
+        def counting(path):
+            opened.append(path)
+            return real(path)
+
+        with mock.patch.object(model, "open_ro", counting):
+            model.kpis(None, self.now)
+            model.token_rows(None, self.now)
+            separate = len(opened)
+            opened.clear()
+            with model.read_session():
+                model.kpis(None, self.now)
+                model.token_rows(None, self.now)
+                model.entity_rows("tools", None, self.now)
+            together = len(opened)
+        self.assertEqual(separate, 2)
+        self.assertEqual(together, 1)

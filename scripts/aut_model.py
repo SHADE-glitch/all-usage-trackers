@@ -18,6 +18,8 @@ Two rules hold throughout:
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import re
 import sqlite3
 import time
@@ -146,7 +148,55 @@ def _where(start_ms: int | None, end_ms: int):
     return "(? IS NULL OR ts >= ?) AND ts <= ?", (start_ms, start_ms, end_ms)
 
 
+# The connections `read_session()` opened for the current block, if any. A
+# ContextVar rather than a global so a second task's reload cannot inherit this
+# one's snapshot.
+_READ_SESSION: contextvars.ContextVar[dict[str, sqlite3.Connection] | None] = \
+    contextvars.ContextVar("aut_read_session", default=None)
+
+
+@contextlib.contextmanager
+def read_session():
+    """One read transaction per source for everything inside the block.
+
+    A tab's reload asks several questions — the KPIs, the model rows, the
+    skills, the newest call. Answered one at a time, a tracker syncing in
+    between can serve the first from before its commit and the last from
+    after, and the screen then holds two different moments that look like one
+    picture. Inside this block each source is read through one connection in
+    one read transaction, so a screen is a snapshot. Cross-source consistency
+    is still not claimed: the three indexes commit independently.
+    """
+    conns: dict[str, sqlite3.Connection] = {}
+    for source in SOURCES:
+        path = source.db_path
+        if not path.is_file():
+            continue
+        try:
+            conn = open_ro(path)
+            conn.execute("BEGIN")
+        except sqlite3.Error:
+            continue
+        conns[source.key] = conn
+    token = _READ_SESSION.set(conns)
+    try:
+        yield conns
+    finally:
+        _READ_SESSION.reset(token)
+        for conn in conns.values():
+            conn.close()
+
+
 def _connect(source: Source) -> sqlite3.Connection | None:
+    """A connection to read one source from.
+
+    Inside `read_session()` this is the session's own connection, so every
+    question a screen asks is answered from one snapshot; outside it, the
+    caller gets a connection it must close.
+    """
+    session = _READ_SESSION.get()
+    if session is not None:
+        return session.get(source.key)
     path = source.db_path
     if not path.is_file():
         return None
@@ -154,6 +204,27 @@ def _connect(source: Source) -> sqlite3.Connection | None:
         return open_ro(path)
     except sqlite3.Error:
         return None
+
+
+def _close(conn: sqlite3.Connection) -> None:
+    """Close a connection unless `read_session()` owns it."""
+    if _READ_SESSION.get() is None:
+        conn.close()
+
+
+# What the merges could not read, by (source, query). A column that only this
+# layer names has no other way to surface: the source's own snapshot can be
+# fine while the tab it feeds is empty. Sources reads this so "contributes
+# nothing" never looks like "ok".
+_ERRORS: dict[tuple[str, str], str] = {}
+
+
+def source_errors() -> dict[str, str]:
+    """Sources whose merge query failed, and the reason. Empty when all is well."""
+    out: dict[str, str] = {}
+    for (key, _query), message in _ERRORS.items():
+        out.setdefault(key, message)
+    return out
 
 
 def _per_source(start_ms, end_ms, fn):
@@ -166,12 +237,16 @@ def _per_source(start_ms, end_ms, fn):
             continue
         try:
             out.extend(fn(conn, source, where, params))
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
             # A schema that moved is reported by the Sources tab, not by a
-            # traceback in the middle of an aggregate.
+            # traceback in the middle of an aggregate — but it is still
+            # reported: the key is the query, so a repaired index clears it.
+            _ERRORS[(source.key, fn.__qualname__)] = str(exc)
             continue
+        else:
+            _ERRORS.pop((source.key, fn.__qualname__), None)
         finally:
-            conn.close()
+            _close(conn)
     return out
 
 
@@ -507,7 +582,7 @@ def model_calls(source_key: str | None, names: tuple[str, ...], start_ms: int | 
         except sqlite3.Error:
             continue
         finally:
-            conn.close()
+            _close(conn)
         out.extend(CallRow(ts=int(r[0]), source=source.key, label=source.label,
                            model=str(r[4] or ""), project=str(r[1]),
                            session=str(r[2]), total=_opt_int(r[3])) for r in rows)
@@ -541,7 +616,7 @@ def model_daily(source_key: str | None, names: tuple[str, ...], start_ms: int | 
         except sqlite3.Error:
             continue
         finally:
-            conn.close()
+            _close(conn)
         for row in rows:
             key = str(row[0])
             if key in totals:
@@ -576,7 +651,7 @@ def entity_calls(kind: str, names: str | tuple[str, ...], start_ms: int | None,
         except sqlite3.Error:
             continue
         finally:
-            conn.close()
+            _close(conn)
         for r in rows:
             out.append(CallRow(ts=int(r[0]), source=source.key, label=source.label,
                                model="", project=str(r[1]), session=str(r[2]),
@@ -778,7 +853,7 @@ def model_stats(source_key: str | None, names: tuple[str, ...], start_ms: int | 
         except sqlite3.Error:
             continue
         finally:
-            conn.close()
+            _close(conn)
         seen = True
         row_calls = int(row[1] or 0)
         calls += row_calls

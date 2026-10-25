@@ -13,6 +13,49 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+## D-003 · 2026-10-25 · fix
+
+**Symptom** — four places where the board's promises outran its code. `aut json`
+imported the date picker at module level, so the "pure standard library" report
+needed Textual to start. A model name containing `[` reached a `DataTable` as a
+plain `str`, which Textual parses as Rich markup — `bad[/red]` raised
+`MarkupError` inside the renderer and took the screen with it — and an ESC in a
+name was handed to the terminal untouched. A tracker that dropped a column only
+the merges read (`provider`, `status`, `duration_ms`) still showed `ok` on
+Sources while Tokens or Tools came back empty with no explanation. And each
+tab's reload opened a fresh connection per question, so a tracker syncing in
+between could answer the KPIs from before its commit and the model rows from
+after — one screen, two moments.
+
+**Change** — the window arithmetic (presets, `CustomWindow`, the date/time
+parsers, `bounds_of`) moved to `aut_windows.py`, which imports no Textual;
+`aut_picker` is the modal only and `aut_report` reads `aut_windows`. Every
+tracker string that becomes a cell goes through `_cell`, which replaces C0
+control characters and builds a `Text` — a `Text` is never parsed as markup.
+The Sources note is a `Text` too, and the sync notification sets
+`markup=False` because its tail is the child's own output. `Source._read`
+prepares one SELECT naming the columns the merges need (its own expressions
+plus `model`, `provider`, `session_id`, `ts`) and reports `error` when that
+fails; `aut_model` records a failed merge query per (source, query) in
+`source_errors()` and Sources shows `error` for it, clearing when the same
+query succeeds again. `aut_model.read_session()` opens one connection per
+source inside one read transaction; every pane's reload and both detail
+screens run inside it, and `Snapshot` starts its own read transaction.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests`: 68 tests, OK.
+The new cases run the JSON report in a child process with `textual` blocked,
+check `_cell` on `bad[/red]` and on an ESC payload, render a `bad[/red]` model
+through the board, read a source without `provider` as `error`, surface a
+missing entity `status` column through `source_errors()`, and count
+connections: one reload now opens one per source instead of one per query.
+
+**Cost** — a reload holds a read transaction per source for its duration, so a
+tracker syncing at that moment waits (the connection is `mode=ro` with a 2s
+busy timeout) rather than interleaving. Cross-source consistency is still not
+claimed: the three indexes commit independently, and only each source's own
+numbers come from one moment. A new module is one more import for anything
+that needs a window.
+
 ## D-001 · 2026-10-25 · guard
 
 **Symptom** — this repo's `AGENTS.md` declared dimension A, but the repo was not in

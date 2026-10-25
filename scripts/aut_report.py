@@ -15,8 +15,8 @@ import sys
 import time
 
 from aut_db import WINDOWS
-from aut_picker import bounds_of
 from aut_sources import BY_KEY, SOURCES, Snapshot, snapshots
+from aut_windows import bounds_of
 
 
 def _as_dict(snap: Snapshot) -> dict:

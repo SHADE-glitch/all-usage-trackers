@@ -94,6 +94,10 @@ class Source:
         size = path.stat().st_size
         try:
             conn = open_ro(path)
+            # One read transaction for the whole snapshot: the totals, the
+            # trend and the top rows are separate statements, and a tracker
+            # syncing in between must not make them describe two moments.
+            conn.execute("BEGIN")
         except sqlite3.Error as exc:
             return Snapshot(
                 key=self.key, label=self.label, status="error",
@@ -115,6 +119,21 @@ class Source:
     def _read(self, conn: sqlite3.Connection, days: int, now: int,
               path: Path, size: int, since_ms: int | None = None,
               end_ms: int | None = None) -> Snapshot:
+        # Prove the columns the *merges* need, not just the ones this file's own
+        # query touches. aut_model names model/provider/session_id/ts directly,
+        # so a tracker that dropped one of them used to show "ok" on Sources
+        # while the Tokens and Tools tabs came back empty with no explanation.
+        # A schema that moved is one event, and it is reported where a reader
+        # looks for it: preparing this SELECT raises, and snapshot() turns that
+        # into the error row.
+        conn.execute(
+            f"SELECT {self.expr_total}, {self.expr_input}, {self.expr_output},"
+            f" {self.expr_cache_read}, {self.expr_cache_write},"
+            f" {self.cost_expr}, {self.real_col}, {self.expr_project},"
+            f" model, provider, session_id, ts"
+            f" FROM {self.table} LIMIT 0"
+        )
+
         # A caller with a calendar window (the Sources tab) passes its own start
         # and end, so this row and the KPI strip above it count the same calls.
         # A rolling "last 24h" here against a "since midnight" total above is
