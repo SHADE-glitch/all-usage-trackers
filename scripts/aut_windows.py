@@ -21,14 +21,6 @@ RANGE_LABELS = {"1d": "Today", "2d": "2 days", "3d": "3 days", "7d": "7 days",
                 "14d": "14 days", "30d": "30 days", "all": "All time"}
 
 
-DATE_DISPLAY_FMT = "%m/%d/%Y"
-TIME_DISPLAY_FMT = "%H:%M"
-# The date is split by hand rather than through a table of strptime formats:
-# a yearless "%m-%d" parse is deprecated in 3.14 (the default year is ambiguous
-# and leap day cannot resolve), so the missing year is filled in explicitly.
-_DATE_SPLIT = re.compile(r"[-/.]")
-_TIME_FORMATS = ("%I:%M %p", "%I:%M%p", "%I %p", "%I%p", "%H:%M", "%H:%M:%S")
-
 class CustomWindow(NamedTuple):
     """An absolute window chosen in the date picker (as opposed to a preset).
 

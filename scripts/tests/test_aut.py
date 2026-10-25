@@ -1145,9 +1145,19 @@ class TestBoard(unittest.IsolatedAsyncioTestCase):
             shown = [getattr(c, "plain", str(c)) for c in table.get_row_at(0)]
             self.assertIn("bad[/red]", " ".join(shown))
 
-if __name__ == "__main__":
-    unittest.main()
 
+
+    async def test_usage_does_not_offer_an_open_that_cannot_happen(self):
+        from aut_app import AutApp
+
+        app = AutApp()
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.press("5")          # Usage: a list of calls, no detail screen
+            await pilot.pause()
+            self.assertFalse(app.check_action("select_cursor", ()))
+            await pilot.press("4")          # Tokens: a model row does open
+            await pilot.pause()
+            self.assertTrue(app.check_action("select_cursor", ()))
 
 class TestChart(unittest.TestCase):
     """The bars, pinned glyph by glyph — a proportion is easy to lie with."""
@@ -1239,6 +1249,40 @@ class TestHardening(unittest.TestCase):
         self.assertEqual(model.entity_rows("tools", None, self.now), [])
         self.assertIn("cbut", model.source_errors())
 
+    def test_an_index_without_a_usage_flag_is_not_vouched_for(self):
+        """No flag at all is "not recorded", not "all recorded"."""
+        conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
+        conn.execute(
+            "INSERT INTO model_responses (message_id, session_id, model, provider,"
+            " prompt_tokens, completion_tokens, ts, project, usage_available)"
+            " VALUES ('m1', 's1', 'm', 'p', 10, 5, ?, '/p', NULL)",
+            (self.now,),
+        )
+        conn.commit()
+        conn.close()
+        snap = BY_KEY["cbut"].snapshot(1, self.now)
+        self.assertEqual(snap.status, "ok")
+        self.assertEqual(snap.tokens, 15)
+        self.assertFalse(snap.tokens_real)
+        self.assertIn("does not record", snap.note)
+
+    def test_a_conversion_error_in_a_source_is_an_error_row(self):
+        """A text where a number belongs is that source's error, not a crash."""
+        _db(self.home, "codebuddy-usage-tracker", CBUT_DDL).close()
+        source = BY_KEY["cbut"]
+        with mock.patch.object(type(source), "_read",
+                               side_effect=ValueError("invalid literal: 'abc'")):
+            snap = source.snapshot(1, self.now)
+        self.assertEqual(snap.status, "error")
+        self.assertIn("abc", snap.note)
+
+    def test_the_report_refuses_a_window_it_does_not_have(self):
+        import aut_report
+
+        with self.assertRaises(SystemExit) as raised:
+            aut_report.main(["json", "--days", "14"])
+        self.assertEqual(raised.exception.code, 2)
+
     def test_one_reload_opens_one_connection_per_source(self):
         """A tab's four questions must come from one read transaction."""
         _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True).close()
@@ -1261,3 +1305,7 @@ class TestHardening(unittest.TestCase):
             together = len(opened)
         self.assertEqual(separate, 2)
         self.assertEqual(together, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

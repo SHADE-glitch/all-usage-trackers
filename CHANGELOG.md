@@ -13,6 +13,41 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+## D-004 · 2026-10-25 · fix
+
+**Symptom** — six more places where the board said something it could not
+support. `tokens_real` treated "no usage flag anywhere in the index" as "every
+call carried usage", so a tracker that never wrote the flag got the same vouch
+as one that did. A value that is text where a number belongs escaped as an
+uncaught `ValueError` out of a source read instead of becoming that source's
+`error` row. `aut sync` had no ceiling while the board's `r` waited 300s.
+`--days 14` became 7 without a word. The status line printed "synced 0s ago"
+at boot, before anything had been synced, and counted indexes that exist on
+disk as if they had been read. Usage hid that its list is capped at 300 rows,
+and offered "Open" in the footer with nothing to open.
+
+**Change** — `Snapshot` requires `real_avg is not None` before it vouches for
+a total, and says so in a third note ("the index does not record whether calls
+carried usage"). `snapshot()` and `_per_source()` catch
+`(sqlite3.Error, ValueError, TypeError)`, so a bad conversion is that
+source's error. `SYNC_TIMEOUT_S` moved into `aut_sources` and `aut sync`
+applies it. `--days` takes `choices` from `WINDOWS`, so an unknown window is
+refused with usage instead of being rounded. The status line reads "indexes on
+disk" and prints "synced" only after this session has synced. Usage names its
+300-row cap in the note, and `check_action` answers "Open" only for the tabs
+that implement `open_selected`.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests`: 72 tests, OK.
+The new cases cover an index whose usage flag is all NULL reading as a floor
+with its own note, a `_read` that raises `ValueError` becoming an `error` row,
+`aut json --days 14` exiting 2, and the Usage tab offering no "Open" while
+Tokens' does.
+
+**Cost** — a JSON consumer that passed an arbitrary `--days` (14, 3, 0.5) now
+gets exit 2 instead of a silent 7-day report. `tokens_real: false` for an index
+without the flag is a downgrade of a claim, not of a number: the tokens are
+still summed, and only the vouch is withdrawn.
+
 ## D-003 · 2026-10-25 · fix
 
 **Symptom** — four places where the board's promises outran its code. `aut json`

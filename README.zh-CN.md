@@ -141,7 +141,7 @@ aut json --days 7    # 与看板同源的快照，输出 JSON
 aut --help
 ```
 
-`aut json` 的 `--days` 接受 `1` / `7` / `30` / `0`（= 全部），并且是纯标准库，不需要 venv——这正是它能被脚本直接调用的原因。
+`aut json` 的 `--days` 接受 `1` / `7` / `30` / `0`（= 全部），其它值会被拒绝而不是被悄悄改成 7；它是纯标准库，不需要 venv——这正是它能被脚本直接调用的原因。
 
 ## 🧯 故障排查
 
@@ -151,6 +151,8 @@ aut --help
 | 某家显示 `error` | 它的 `usage.db` 与 `aut` 读的列对不上了 | 见[契约文件](docs/maintenance/tracker-contracts.md)；适配器就是 `scripts/aut_sources.py` 里的一条 |
 | 某家显示 `idle` | 最近一周没有调用——不是故障 | 不用管 |
 | 某个模型显示 `—` | 那家报了调用，但没报 token（例如只记 credit 的 BYOK 路由） | 先去那家自己的面板核对；看板不会把未知写成 0 |
+| 某家的备注说索引不记录 usage | 那家写了调用却没写 usage 标记，于是没有任何东西为这个总量背书 | 总量是下限；去那家自己的面板核对 |
+| 状态栏没有 `synced` 这一项 | 本次会话还没同步过——看板只是在启动时读了索引 | 按 `r`，或把数字理解为 app 启动那一刻 |
 | `aut: command not found` | `~/.local/bin` 不在 `PATH` 里 | 加进 `PATH`，或用 `AUT_BIN_DIR` 重跑 `install.sh` |
 | 看板起不来，但 `aut json` 正常 | venv 没了或 Textual 缺失 | 重跑 `./install.sh` |
 

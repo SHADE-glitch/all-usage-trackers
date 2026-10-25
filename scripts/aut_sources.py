@@ -24,6 +24,10 @@ from aut_db import DAY_MS, cutoff_ms, open_ro, spark_width
 # words are kept apart so a badge never implies a fault that is just no usage.
 IDLE_AFTER_MS = 7 * DAY_MS
 
+# A tracker's own sync is a child process, and it gets the same ceiling from the
+# TUI and from `aut sync`: a sync that hangs must not hold either one forever.
+SYNC_TIMEOUT_S = 300
+
 
 @dataclass(slots=True)
 class Snapshot:
@@ -106,7 +110,11 @@ class Source:
 
         try:
             return self._read(conn, days, now, path, size, since_ms, end_ms)
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, ValueError, TypeError) as exc:
+            # A column that holds text where a number belongs is the same event
+            # as a column that moved: one source is broken, the other two still
+            # answer, and the broken one says so instead of taking the screen
+            # down with a ValueError.
             # A tracker that changed its schema is a real event, not a crash:
             # the row says so and the other two sources keep working.
             return Snapshot(
@@ -191,14 +199,21 @@ class Source:
         top_models = self._top(conn, "model", since, end)
         top_projects = self._top(conn, "project", since, end)
 
+        # No usage flag at all is "not recorded", not "all recorded": an index
+        # that never wrote the column cannot vouch for the number beside it.
         tokens_real = (tokens_value is not None and unknown == 0
-                       and (real_avg is None or float(real_avg) >= 0.999))
+                       and real_avg is not None and float(real_avg) >= 0.999)
         status = "ok"
         if last_ts is not None and end - int(last_ts) > IDLE_AFTER_MS:
             status = "idle"
 
-        note = "all recorded calls carried usage" if tokens_real else \
-            "some calls reported no usage — the token total is a floor"
+        if tokens_real:
+            note = "all recorded calls carried usage"
+        elif real_avg is None and tokens_value is not None and unknown == 0:
+            note = ("the index does not record whether calls carried usage — "
+                    "the token total is a floor")
+        else:
+            note = "some calls reported no usage — the token total is a floor"
 
         return Snapshot(
             key=self.key, label=self.label, status=status, note=note,

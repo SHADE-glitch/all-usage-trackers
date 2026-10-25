@@ -141,7 +141,7 @@ aut json --days 7    # the same snapshot the board draws, as JSON
 aut --help
 ```
 
-`aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` and is stdlib-only, so it works without the venv — which is what makes it usable from a script.
+`aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` — anything else is refused, not silently rounded to 7 — and is stdlib-only, so it works without the venv, which is what makes it usable from a script.
 
 ## 🧯 Troubleshooting
 
@@ -151,6 +151,8 @@ aut --help
 | a source shows `error` | its `usage.db` no longer matches the columns `aut` reads | see [the contracts file](docs/maintenance/tracker-contracts.md); the adapter is one entry in `scripts/aut_sources.py` |
 | a source shows `idle` | no calls in the last week — not a fault | nothing |
 | a model shows `—` | that source reported calls but no token figure (for example a BYOK route that only records credits) | check that tracker's own panel; the board will not turn unknown into 0 |
+| a source's note says the index does not record usage | the tracker wrote the calls but not the usage flag, so nothing vouches for the total | the total is a floor; compare against that tracker's own panel |
+| a line says `synced` is missing | this session has not run a sync — the board read the indexes at start | press `r`, or read the numbers as of the app start |
 | `aut: command not found` | `~/.local/bin` not on `PATH` | add it, or re-run `install.sh` with `AUT_BIN_DIR` |
 | the board will not start, `aut json` works | the venv is gone or Textual is missing | re-run `./install.sh` |
 

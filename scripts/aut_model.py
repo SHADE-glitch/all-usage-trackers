@@ -237,10 +237,12 @@ def _per_source(start_ms, end_ms, fn):
             continue
         try:
             out.extend(fn(conn, source, where, params))
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, ValueError, TypeError) as exc:
             # A schema that moved is reported by the Sources tab, not by a
             # traceback in the middle of an aggregate — but it is still
             # reported: the key is the query, so a repaired index clears it.
+            # ValueError/TypeError are the same class of event (a text where a
+            # number belongs), not a reason to end the whole reload.
             _ERRORS[(source.key, fn.__qualname__)] = str(exc)
             continue
         else:

@@ -34,7 +34,7 @@ import aut_model as model
 from aut_chart import pct, share_bar
 from aut_db import DAY_MS, fmt_age, fmt_tokens, sparkline
 from aut_picker import DateRangeModal
-from aut_sources import BY_KEY, SOURCES, snapshots
+from aut_sources import BY_KEY, SOURCES, SYNC_TIMEOUT_S, snapshots
 from aut_windows import CustomWindow, RANGE_LABELS, bounds_of, window_label
 
 # Per-tab default window, the family's rule: the summary tabs open on today, the
@@ -61,9 +61,10 @@ RANGE_OPTIONS = [(RANGE_LABELS[k], k)
     ("Custom…", "custom")]
 CUSTOM_RANGE = "custom"
 
-# A tracker's sync parses every log it has not seen yet, so it can be slow — but
-# a sync that never returns must not wedge the board.
-SYNC_TIMEOUT_S = 300
+# The Usage list is a page, not the window: the same 300 rows the detail screens
+# ask for, named in the caption so the number above the table cannot be read as
+# the window's total.
+CALL_LIMIT = 300
 
 # One colour per source, used by every tab. Scanning for "which tool" should be a
 # colour match, not a word match.
@@ -673,9 +674,13 @@ class UsagePane(TablePane):
         }
 
     def extra_note(self) -> str:
-        text = "newest calls from the three trackers"
+        # The list is a page, not the window: say so, or a reader adds it up and
+        # calls the sum "the window's calls".
+        text = f"newest {CALL_LIMIT} calls from the three trackers"
         if self.sort_index == 0 and self._raw and self._raw != len(self._rows):
             text = f"{self._raw:,} calls, merged per minute"
+        if self._raw >= CALL_LIMIT:
+            text += f" · capped at {CALL_LIMIT}"
         home = str(Path.home())
         if self._rows and all(not r.project or r.project == home for r in self._rows):
             text += " · all from ~"
@@ -1287,7 +1292,10 @@ class AutApp(App[None]):
     def __init__(self) -> None:
         super().__init__()
         self.windows = dict(DEFAULT_RANGES)
-        self._synced_ms = int(time.time() * 1000)
+        # None until this session actually syncs something: at boot the board has
+        # read the indexes, it has not refreshed them, and "synced 0s ago" would
+        # be a claim about work that never ran.
+        self._synced_ms: int | None = None
         self._syncing = False
         self._sync_step = ""
 
@@ -1390,12 +1398,14 @@ class AutApp(App[None]):
                 missing += 1
         if self._syncing and self._sync_step:
             parts.append(f"[b]{self._sync_step}[/b]")
-        parts.append(f"{len(SOURCES) - missing} of {len(SOURCES)} indexes")
+        # "on disk", not "read": a corrupt index is still a file, and this line
+        # counts files. What each index could answer is the Sources tab's job.
+        parts.append(f"{len(SOURCES) - missing} of {len(SOURCES)} indexes on disk")
         if total:
             parts.append(_human_size(total))
         if missing:
             parts.append(f"{missing} missing")
-        if not self._syncing:
+        if not self._syncing and self._synced_ms is not None:
             parts.append(f"synced {fmt_age(self._synced_ms)}")
         self.query_one("#status", Static).update(" · ".join(parts))
 
@@ -1443,6 +1453,11 @@ class AutApp(App[None]):
             return isinstance(pane, TokensPane)
         if action in ("filter", "clear_filter"):
             return isinstance(pane, TablePane)
+        if action == "select_cursor":
+            # Only the tabs that implement open_selected offer "Open": Usage is
+            # a list of calls with no detail screen, and the footer is the key
+            # list, so it must not name a key that does nothing.
+            return isinstance(pane, (TokensPane, EntityPane, SourcesPane))
         return True
 
     # -- actions -----------------------------------------------------------

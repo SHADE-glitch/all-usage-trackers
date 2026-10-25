@@ -15,7 +15,7 @@ import sys
 import time
 
 from aut_db import WINDOWS
-from aut_sources import BY_KEY, SOURCES, Snapshot, snapshots
+from aut_sources import BY_KEY, SOURCES, SYNC_TIMEOUT_S, Snapshot, snapshots
 from aut_windows import bounds_of
 
 
@@ -79,7 +79,15 @@ def cmd_sync(args: argparse.Namespace) -> int:
             continue
         print(f"aut: syncing {source.label}", flush=True)
         try:
-            code = subprocess.call(source.sync_argv())
+            code = subprocess.run(source.sync_argv(),
+                                  timeout=SYNC_TIMEOUT_S).returncode
+        except subprocess.TimeoutExpired:
+            # The same ceiling the board gives a sync: a hung child must not
+            # hold a scripted caller forever.
+            print(f"aut: {source.binary} sync timed out after {SYNC_TIMEOUT_S}s",
+                  file=sys.stderr)
+            failed += 1
+            continue
         except FileNotFoundError:
             # A tracker that is not installed is a normal state on a machine that
             # only uses one of them — report it, do not traceback.
@@ -97,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     js = sub.add_parser("json", help="print the combined snapshot as JSON")
-    js.add_argument("--days", type=int, default=7,
+    js.add_argument("--days", type=int, default=7, choices=[d for d, _ in WINDOWS],
                     help="window in days: 1, 7, 30, or 0 for all time")
     js.set_defaults(func=cmd_json)
 
@@ -106,9 +114,6 @@ def main(argv: list[str] | None = None) -> int:
     sy.set_defaults(func=cmd_sync)
 
     args = parser.parse_args(argv)
-    valid = {days for days, _ in WINDOWS}
-    if getattr(args, "days", 7) not in valid:
-        args.days = 7
     return args.func(args)
 
 
