@@ -198,18 +198,6 @@ def _avg(ms: float | None) -> str:
     return f"{ms:.0f}ms"
 
 
-def _delta(now: int | None, prev: int | None) -> Text:
-    """A change against the previous window, or nothing when there is no base."""
-    if now is None or prev is None:
-        return Text("—", style="dim")
-    if prev <= 0:
-        return Text("new", style="green")
-    change = (now - prev) / prev * 100
-    arrow = "↑" if change >= 0 else "↓"
-    style = "red" if change >= 0 else "green"   # more tokens is not "good"
-    return Text(f"{arrow}{abs(change):.0f}%", style=style)
-
-
 class Table(DataTable):
     """DataTable with a visible enter binding.
 
@@ -509,11 +497,24 @@ class TokensPane(TablePane):
             return model.by_source(rows)
         return rows
 
+    @staticmethod
+    def _total_cell(row, width: int) -> str:
+        """The total, starred when part of the window reported no token usage.
+
+        The number is the tracker's own `SUM()` over the rows that reported; the
+        star says it is not the whole window, so a partial sum is never read as
+        a total. The caption explains the star once, not on every row.
+        """
+        text = fmt_tokens(row.total)
+        if row.total is not None and not row.tokens_real:
+            text += "*"
+        return f"{text:>{width}}"
+
     def cells(self, row) -> dict[str, object]:
         if isinstance(row, model.ModelTotal):
             return {
                 "model": _cell(row.model),
-                "usage total": f"{fmt_tokens(row.total):>7}",
+                "usage total": self._total_cell(row, 7),
                 "cbut": self._per(row, "cbut"),
                 "ocut": self._per(row, "ocut"),
                 "qcut": self._per(row, "qcut"),
@@ -528,7 +529,7 @@ class TokensPane(TablePane):
             "output": f"{fmt_tokens(row.output):>8}",
             "cache r": f"{fmt_tokens(row.cache_read):>8}",
             "cache w": f"{fmt_tokens(row.cache_write):>8}",
-            "usage total": f"{fmt_tokens(row.total):>8}",
+            "usage total": self._total_cell(row, 8),
             "req": f"{row.requests:>6,}",
             "last used": fmt_age(row.last_used),
         }
@@ -549,15 +550,20 @@ class TokensPane(TablePane):
         self.reload(self.window)
 
     def extra_note(self) -> str:
+        # The window total sums the rows that measured something, the same way
+        # each tracker's own panel does; a row that measured nothing is unknown
+        # on its own line, not a reason to blank the caption.
         known = [r.total for r in self._rows if r.total is not None]
-        total = (None if any(r.total is None for r in self._rows)
-                 else (sum(known) if known else None))
+        total = sum(known) if known else None
         label = self.MODE_LABELS[self.mode]
         if self.size.width and self.size.width < 100:
             # The long label is what wraps the caption at 80 columns; the mode
             # is still named, without the clause explaining the merge.
             label = label.split(",")[0]
-        return (f"grouping: {label} (g) · total {fmt_tokens(total)}")
+        note = f"grouping: {label} (g) · total {fmt_tokens(total)}"
+        if any(r.total is not None and not r.tokens_real for r in self._rows):
+            note += " · * some calls reported no token usage"
+        return note
 
     def open_selected(self) -> None:
         row = self.selected()
@@ -805,10 +811,7 @@ class DashboardPane(Pane):
         total = k.tokens
         out = Text("Window\n", style="bold")
         out.append(fmt_tokens(total), style="bold")
-        out.append(" usage total   ")
-        out.append_text(_delta(k.tokens, k.prev_tokens))
-        if k.prev_tokens is not None:
-            out.append(f" vs {fmt_tokens(k.prev_tokens)}", style="dim")
+        out.append(" usage total")
         bits = [f"{k.sessions:,} sessions", f"{k.calls:,} calls"]
         if k.active_days:
             bits.append(f"{k.active_days} active "

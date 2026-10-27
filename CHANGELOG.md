@@ -13,6 +13,56 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+## D-008 · 2026-10-27 · fix
+
+**Symptom** — with **All time** (and any window containing one of them) the Tokens tab showed
+`—` for CodeBuddy's usage total, input and output while `req` read 44,473, and the Dashboard's
+window card showed `token usage not reported in this window`. Six rows out of 44,473 have
+`usage_available = 0` because their transcript carried no usage block at all
+(`missing = rawUsage`); one such row in a group was enough to make that group unknown, and
+`by_source`/`model_totals` folded "unknown" into the whole row. 10.91B tokens read as `—`.
+
+**Change** — the aggregates now follow the three trackers' own semantics: cbut, ocut and qcut each
+compute their panels with a plain `SUM()`, which skips rows that reported nothing and is NULL only
+when *no* row did, and each prints `missing_*` counts beside the number. `_measured_sum()` states
+that rule once and the three aggregate sites (`token_rows`, `kpis`, `model_stats`) use it;
+`_sum_opt()` now ignores a part that measured nothing instead of poisoning the fold. A partially
+measured row keeps `tokens_real = False`, which the Tokens tab renders as a `*` on the total with
+one legend line in the caption — the number is the measured sum, and it says so.
+
+**Verified against the source of truth** — aut's all-time CodeBuddy total is now
+`10,912,133,700`, byte-identical to `cbut q_usage_summary().usage_total_tokens` over the same
+window (which reports `missing_prompt: 6`, `missing_completion: 6` alongside). The hard rule still
+holds: a source that reports **no** tokens at all is still `—`, never `0` — the BYOK tests are
+unchanged and still pass. What changed is that "some rows were unmeasured" is now disclosed rather
+than used as a reason to withhold a number the tracker itself prints.
+
+**Not changed on purpose** — the Sources tab's share column still goes `—` when any tracker's
+window is wholly unmeasured: a share is a fraction of a whole, and an unknown denominator makes the
+fraction unknown in a way a sum does not.
+
+## D-007 · 2026-10-27 · fix
+
+**Symptom** — the dashboard's window card printed a second figure beside the total
+(`↑2% vs 1.95B`). That figure was the window of the same length immediately before the current one,
+computed by a nested `kpis()` call. With a custom range picked from the two date fields it stopped
+arriving: a three-day span already produced no base (the nested call passes `_delta=False`, so only
+one level was ever computed), and the card silently lost the tail of its own line instead of saying
+so. The number was also a second claim about rows the total already described.
+
+**Change** — remove the comparison rather than repair it. `Kpis.prev_tokens` / `prev_sessions`,
+the nested `kpis()` call and `aut_app._delta()` are gone; the window card now reads
+`<total> usage total · N sessions · M calls · K active days`. The test that pinned the comparison
+now pins the opposite: the row outside the window is counted nowhere, and the dataclass has no
+field to put it in. README's Dashboard row and both mock lines lost the segment; the box keeps its
+width.
+
+**Still open (not changed on purpose)** — for a window of seven days or more, one row whose
+`usage_available` is 0 sets `tokens` to `None` for the whole window, so the card falls back to
+"token usage not reported in this window" even though most rows did report. Fixing it means deciding
+what a partially-measured total should say, which is a rule change, not a bug fix; the owner asked
+for the total to stay as it is.
+
 ## D-006 · 2026-10-25 · chore
 
 **Symptom** — the 2026-10-25 read-only audit of this repository existed only as a one-off session

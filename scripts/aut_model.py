@@ -136,8 +136,6 @@ class Kpis:
     calls: int = 0
     active_days: int = 0
     per_source: dict[str, int | None] = field(default_factory=dict)
-    prev_tokens: int | None = None
-    prev_sessions: int | None = None
     tokens_real: bool = True
 
 
@@ -258,10 +256,35 @@ def _opt_int(value) -> int | None:
 
 
 def _sum_opt(left: int | None, right: int | None) -> int | None:
-    """Add two optional counts; an unknown part makes the sum unknown too."""
-    if left is None or right is None:
-        return None
+    """Add two optional counts, ignoring a part that measured nothing.
+
+    A part is None when its own `SUM()` was NULL — every row behind it reported
+    no token (a BYOK route, or a group whose rows are all unmeasured). Dropping
+    it keeps the fold equal to the tracker's own `SUM()` over the rows that did
+    report. Returning None instead blanked a number the source itself displays:
+    six unmeasured CodeBuddy rows out of 44,473 turned the whole column into "—".
+    Only when *both* parts are None is the sum unknown.
+    """
+    if left is None:
+        return right
+    if right is None:
+        return left
     return left + right
+
+
+def _measured_sum(total: int | None, calls: int) -> int | None:
+    """The tracker's own total: `SUM()` over the rows that reported.
+
+    `SUM()` is NULL only when *no* row in the group carried a token, so a NULL
+    here means "this group measured nothing", not "part of it is missing". A
+    group with no calls at all is a real zero. cbut, ocut and qcut all compute
+    their panels this way and print `missing_*` counts beside the number rather
+    than withholding it; aut mirrors that, and marks the row
+    `tokens_real = False` so the board can say the number is partial.
+    """
+    if calls == 0:
+        return 0
+    return total
 
 
 # --- tokens -----------------------------------------------------------------
@@ -281,7 +304,7 @@ def token_rows(start_ms: int | None, end_ms: int) -> list[TokenRow]:
         out = []
         for r in rows:
             unknown = int(r[10] or 0)
-            total = None if unknown else _opt_int(r[6])
+            total = _measured_sum(_opt_int(r[6]), int(r[7] or 0))
             real_avg = r[9]
             out.append(TokenRow(
                 source=source.key, label=source.label,
@@ -421,7 +444,7 @@ def day_labels(start_ms: int | None, end_ms: int, max_days: int = 30) -> list[st
     return [(start_day + timedelta(days=i)).isoformat() for i in range(span)]
 
 
-def kpis(start_ms: int | None, end_ms: int, _delta: bool = True) -> Kpis:
+def kpis(start_ms: int | None, end_ms: int) -> Kpis:
     out = Kpis()
 
     def query(conn, source, where, params):
@@ -446,11 +469,12 @@ def kpis(start_ms: int | None, end_ms: int, _delta: bool = True) -> Kpis:
     for key, row, dates in _per_source(start_ms, end_ms, query):
         seen = True
         row_calls = int(row[1] or 0)
-        # No calls in this window is a real zero; calls whose token columns are
-        # all NULL are unknown and make the merged total unknown.
-        unknown_row = int(row[4] or 0)
-        tokens = (None if unknown_row
-                  else (0 if row_calls == 0 else _opt_int(row[0])))
+        # No calls in this window is a real zero; a source whose rows all lack
+        # tokens is unknown and makes the merged total unknown. A source with a
+        # few unmeasured rows still reports its `SUM()`, exactly as its own
+        # panel does — withholding it blanked 44,467 measured calls over 6 that
+        # were not.
+        tokens = _measured_sum(_opt_int(row[0]), row_calls)
         if tokens is None:
             unknown = True
         else:
@@ -467,19 +491,6 @@ def kpis(start_ms: int | None, end_ms: int, _delta: bool = True) -> Kpis:
     # busiest single tracker's count: two trackers used on different days are
     # two active days.
     out.active_days = len(active_dates)
-
-    # The delta compares against the window of the same length immediately
-    # before this one. "All time" has nothing before it, so it reports no delta
-    # rather than a meaningless zero.
-    if start_ms is not None and _delta:
-        # Shift by whole calendar days, so "today so far" is compared with the
-        # same time of day yesterday — not with the evening before, which is
-        # what shifting by the elapsed milliseconds would do.
-        span_days = max(1, round((end_ms - start_ms) / DAY_MS))
-        prev = kpis(start_ms - span_days * DAY_MS, end_ms - span_days * DAY_MS,
-                    _delta=False)
-        out.prev_tokens = prev.tokens
-        out.prev_sessions = prev.sessions
     return out
 
 
@@ -824,9 +835,7 @@ def model_stats(source_key: str | None, names: tuple[str, ...], start_ms: int | 
         seen = True
         row_calls = int(row[1] or 0)
         calls += row_calls
-        unknown_row = int(row[2] or 0)
-        value = (None if unknown_row
-                 else (0 if row_calls == 0 else _opt_int(row[0])))
+        value = _measured_sum(_opt_int(row[0]), row_calls)
         if value is None:
             unknown = True
         else:

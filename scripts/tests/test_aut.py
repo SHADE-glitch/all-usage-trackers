@@ -303,17 +303,36 @@ class TestUnknownTokens(AdapterCase):
         self.assertEqual(calls, 1)
         self.assertIsNone(model.model_calls(None, ("custom-route",), 0, self.now)[0].total)
 
-    def test_a_mixed_model_is_unknown_not_a_partial_sum(self):
+    def test_a_mixed_model_reports_what_was_measured(self):
+        # qcut's own panel sums the rows that reported (SUM skips NULL) and
+        # prints missing_* counts beside the number. Refusing to sum blanked a
+        # whole column over a handful of rows: six unmeasured CodeBuddy rows out
+        # of 44,473 turned "CodeBuddy" into "—" on every window that included
+        # them. The row keeps the measured sum and says it is partial.
         self._qcut([
             ("m1", "s1", "mixed", self.now, "/p", 100, 20, None, 1),
             ("m2", "s1", "mixed", self.now, "/p", None, None, 5.0, 1),
         ])
         rows = model.token_rows(0, self.now)
         self.assertEqual(len(rows), 1)
-        self.assertIsNone(rows[0].total)
-        self.assertIsNone(model.by_source(rows)[0].total)
-        self.assertIsNone(model.model_totals(rows)[0].total)
-        self.assertIsNone(model.kpis(0, self.now).tokens)
+        self.assertEqual(rows[0].total, 120)
+        self.assertFalse(rows[0].tokens_real)      # the star, not a silent sum
+        self.assertEqual(model.by_source(rows)[0].total, 120)
+        self.assertEqual(model.model_totals(rows)[0].total, 120)
+        self.assertEqual(model.kpis(0, self.now).tokens, 120)
+
+    def test_a_wholly_unmeasured_model_does_not_blank_the_source(self):
+        # The real shape of the CodeBuddy case: the unmeasured rows form their
+        # own model group. Folding must ignore that group, not poison the total.
+        self._qcut([
+            ("m1", "s1", "measured", self.now, "/p", 100, 20, None, 1),
+            ("m2", "s1", "byok", self.now, "/p", None, None, 5.0, 1),
+        ])
+        rows = model.token_rows(0, self.now)
+        folded = model.by_source(rows)[0]
+        self.assertEqual(folded.total, 120)
+        self.assertFalse(folded.tokens_real)
+        self.assertIsNone(next(r for r in rows if r.model == "byok").total)
 
     def test_missing_cbut_parts_are_unknown_even_with_a_cache_hit(self):
         conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
@@ -635,9 +654,11 @@ class TestAggregation(AdapterCase):
         conn.close()
         start, end = bounds_of("1d", self.now)
         k = model.kpis(start, end)
-        # Only today's row is in the window; yesterday's is the comparison.
+        # Only today's row is in the window. Yesterday's is outside it and is
+        # not reported anywhere: the board shows one total, and a second figure
+        # beside it would be a second claim about the same rows.
         self.assertEqual(k.tokens, 100)
-        self.assertEqual(k.prev_tokens, 300)
+        self.assertFalse(hasattr(k, "prev_tokens"))
 
     def test_active_days_are_the_union_of_the_trackers(self):
         cbut = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
