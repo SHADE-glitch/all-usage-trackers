@@ -113,7 +113,26 @@ def _db(home: Path, db_name: str, ddl: str, entities: bool = False) -> sqlite3.C
     return conn
 
 
-class AdapterCase(unittest.TestCase):
+class ClockMixin:
+    """Two names for one instant, because the family window is half-open.
+
+    `now` is where the fixture rows are written. `end` is where the window
+    stops, and it sits one millisecond later: every tracker filters its own
+    window as `ts >= start AND ts < end`, so a row at exactly `end` is outside
+    it. A real render reads the clock after the tracker has committed and its
+    newest row is already strictly older; in a test the row and the clock are
+    the same instant, so the end is nudged instead of pushing every fixture
+    row off the boundary.
+    """
+
+    now: int
+
+    @property
+    def end(self) -> int:
+        return self.now + 1
+
+
+class AdapterCase(ClockMixin, unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
@@ -126,7 +145,7 @@ class AdapterCase(unittest.TestCase):
         self._tmp.cleanup()
 
     def snapshot(self, key: str, days: int = 7) -> Snapshot:
-        return BY_KEY[key].snapshot(days, self.now)
+        return BY_KEY[key].snapshot(days, self.end)
 
 
 class TestMissingAndBroken(AdapterCase):
@@ -278,7 +297,7 @@ class TestUnknownTokens(AdapterCase):
         self._qcut([
             ("m1", "s1", "custom-route", self.now, "/p", None, None, 12.5, 1),
         ])
-        rows = model.token_rows(0, self.now)
+        rows = model.token_rows(0, self.end)
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertIsNone(row.total)
@@ -293,15 +312,15 @@ class TestUnknownTokens(AdapterCase):
         self.assertIsNone(merged.total)
         self.assertFalse(merged.tokens_real)
 
-        k = model.kpis(0, self.now)
+        k = model.kpis(0, self.end)
         self.assertIsNone(k.tokens)
         self.assertIsNone(k.per_source["qcut"])
         self.assertFalse(k.tokens_real)
 
-        tokens, calls = model.model_stats(None, ("custom-route",), 0, self.now)
+        tokens, calls = model.model_stats(None, ("custom-route",), 0, self.end)
         self.assertIsNone(tokens)
         self.assertEqual(calls, 1)
-        self.assertIsNone(model.model_calls(None, ("custom-route",), 0, self.now)[0].total)
+        self.assertIsNone(model.model_calls(None, ("custom-route",), 0, self.end)[0].total)
 
     def test_a_mixed_model_reports_what_was_measured(self):
         # qcut's own panel sums the rows that reported (SUM skips NULL) and
@@ -313,13 +332,13 @@ class TestUnknownTokens(AdapterCase):
             ("m1", "s1", "mixed", self.now, "/p", 100, 20, None, 1),
             ("m2", "s1", "mixed", self.now, "/p", None, None, 5.0, 1),
         ])
-        rows = model.token_rows(0, self.now)
+        rows = model.token_rows(0, self.end)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].total, 120)
         self.assertFalse(rows[0].tokens_real)      # the star, not a silent sum
         self.assertEqual(model.by_source(rows)[0].total, 120)
         self.assertEqual(model.model_totals(rows)[0].total, 120)
-        self.assertEqual(model.kpis(0, self.now).tokens, 120)
+        self.assertEqual(model.kpis(0, self.end).tokens, 120)
 
     def test_a_wholly_unmeasured_model_does_not_blank_the_source(self):
         # The real shape of the CodeBuddy case: the unmeasured rows form their
@@ -328,7 +347,7 @@ class TestUnknownTokens(AdapterCase):
             ("m1", "s1", "measured", self.now, "/p", 100, 20, None, 1),
             ("m2", "s1", "byok", self.now, "/p", None, None, 5.0, 1),
         ])
-        rows = model.token_rows(0, self.now)
+        rows = model.token_rows(0, self.end)
         folded = model.by_source(rows)[0]
         self.assertEqual(folded.total, 120)
         self.assertFalse(folded.tokens_real)
@@ -345,7 +364,7 @@ class TestUnknownTokens(AdapterCase):
         )
         conn.commit()
         conn.close()
-        row = model.token_rows(0, self.now)[0]
+        row = model.token_rows(0, self.end)[0]
         self.assertIsNone(row.total)
         self.assertIsNone(self.snapshot("cbut").tokens)
 
@@ -503,7 +522,7 @@ class TestAggregation(AdapterCase):
 
     def test_tokens_merge_and_fold_by_source(self):
         self._two_sources()
-        rows = model.token_rows(0, self.now)
+        rows = model.token_rows(0, self.end)
         by_model = [r for r in rows if r.model == "m-a"]
         self.assertEqual(len(by_model), 2)
         self.assertEqual(sum(r.total for r in by_model), 175)
@@ -514,7 +533,7 @@ class TestAggregation(AdapterCase):
 
     def test_model_totals_merge_the_same_model_across_trackers(self):
         self._two_sources()
-        rows = model.model_totals(model.token_rows(0, self.now))
+        rows = model.model_totals(model.token_rows(0, self.end))
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].model, "m-a")
         self.assertEqual(rows[0].total, 175)
@@ -528,7 +547,7 @@ class TestAggregation(AdapterCase):
         self._add_token_row("cbut", "deepseek-v4.1-flash", total=400)
         self._add_token_row("cbut", "deepseek-v4-1-flash", total=200)
         self._add_token_row("ocut", "deepseek-v4.1-flash-free", total=50)
-        rows = model.model_totals(model.token_rows(0, self.now))
+        rows = model.model_totals(model.token_rows(0, self.end))
         merged = [r for r in rows if "deepseek" in r.model]
         self.assertEqual(len(merged), 1)
         row = merged[0]
@@ -538,9 +557,9 @@ class TestAggregation(AdapterCase):
                          {"deepseek-v4.1-flash", "deepseek-v4-1-flash",
                           "deepseek-v4.1-flash-free"})
         # ... and the detail reads every one of them, not just the displayed one.
-        tokens, calls = model.model_stats(None, row.spellings, 0, self.now)
+        tokens, calls = model.model_stats(None, row.spellings, 0, self.end)
         self.assertEqual((tokens, calls), (650, 3))
-        listed = model.model_calls(None, row.spellings, 0, self.now)
+        listed = model.model_calls(None, row.spellings, 0, self.end)
         self.assertEqual({c.model for c in listed},
                          {"deepseek-v4.1-flash", "deepseek-v4-1-flash",
                           "deepseek-v4.1-flash-free"})
@@ -549,7 +568,7 @@ class TestAggregation(AdapterCase):
         self._two_sources()
         self._add_token_row("cbut", "deepseek-v4-flash", total=90)
         self._add_token_row("cbut", "deepseek-v4.1-flash", total=400)
-        rows = model.model_totals(model.token_rows(0, self.now))
+        rows = model.model_totals(model.token_rows(0, self.end))
         names = sorted(r.model for r in rows if "deepseek" in r.model)
         self.assertEqual(names, ["deepseek-v4-flash", "deepseek-v4.1-flash"])
         self.assertNotEqual(model.canonical_model("deepseek-v4-flash"),
@@ -559,7 +578,7 @@ class TestAggregation(AdapterCase):
         self._two_sources()
         self._add_token_row("qcut", "dfmodel", total=70)
         with mock.patch.dict(model.MODEL_ALIASES, {"dfmodel": "m-a"}):
-            rows = model.model_totals(model.token_rows(0, self.now))
+            rows = model.model_totals(model.token_rows(0, self.end))
         merged = [r for r in rows if r.model == "m-a"]
         self.assertEqual(len(merged), 1)
         self.assertEqual(merged[0].total, 245)
@@ -568,12 +587,12 @@ class TestAggregation(AdapterCase):
     def test_an_alias_titles_a_row_nothing_else_records(self):
         self._two_sources()
         self._add_token_row("qcut", "qfmodel", total=30)
-        rows = model.model_totals(model.token_rows(0, self.now))
+        rows = model.model_totals(model.token_rows(0, self.end))
         row = next(r for r in rows if "qwen" in r.model)
         self.assertEqual(row.model, "qwen3.8-flash")
         self.assertEqual(row.spellings, ("qwen3.8-flash", "qfmodel"))
         # The id is still queried, so the drill-down finds the calls.
-        self.assertEqual(model.model_stats(None, row.spellings, 0, self.now), (30, 1))
+        self.assertEqual(model.model_stats(None, row.spellings, 0, self.end), (30, 1))
 
     def test_the_shipped_aliases_point_at_the_models_their_platform_names(self):
         # Qoder's builtin routes carry no machine-readable id, so these two are
@@ -587,12 +606,12 @@ class TestAggregation(AdapterCase):
         from aut_windows import bounds_of
 
         self._two_sources()
-        start, end = bounds_of("1d", self.now)
+        start, end = bounds_of("1d", self.end)
         day = model.timeline(start, end)
         self.assertEqual(day.unit, "hour")
         self.assertEqual(len(day.labels), len(model.hour_keys(start, end)))
 
-        start, end = bounds_of("7d", self.now)
+        start, end = bounds_of("7d", self.end)
         week = model.timeline(start, end)
         self.assertEqual(week.unit, "day")
         self.assertEqual(len(week.labels), 7)
@@ -601,13 +620,13 @@ class TestAggregation(AdapterCase):
 
     def test_model_detail_reads_every_tracker_when_no_source_is_given(self):
         self._two_sources()
-        calls = model.model_calls(None, ("m-a",), 0, self.now)
+        calls = model.model_calls(None, ("m-a",), 0, self.end)
         self.assertEqual({c.source for c in calls}, {"cbut", "ocut"})
         self.assertEqual(sum(c.total for c in calls), 175)
 
     def test_skills_merge_by_name_case_insensitively(self):
         self._two_sources()
-        rows = model.entity_rows("skills", 0, self.now)
+        rows = model.entity_rows("skills", 0, self.end)
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row.name, "code-review")   # the spelling with most calls
@@ -619,7 +638,7 @@ class TestAggregation(AdapterCase):
 
     def test_tools_merge_across_capitalisation(self):
         self._two_sources()
-        rows = model.entity_rows("tools", 0, self.now)
+        rows = model.entity_rows("tools", 0, self.end)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].calls, 3)
         self.assertEqual(rows[0].per_source, {"cbut": 2, "ocut": 1})
@@ -633,13 +652,13 @@ class TestAggregation(AdapterCase):
         )
         conn.commit()
         conn.close()
-        row = model.entity_rows("skills", 0, self.now)[0]
+        row = model.entity_rows("skills", 0, self.end)[0]
         self.assertEqual((row.ok, row.fail, row.pending), (0, 0, 1))
 
     def test_missing_database_contributes_nothing(self):
         self._two_sources()
         # qcut has no database here at all.
-        rows = model.token_rows(0, self.now)
+        rows = model.token_rows(0, self.end)
         self.assertEqual({r.source for r in rows}, {"cbut", "ocut"})
 
     def test_kpis_compare_the_same_time_of_day(self):
@@ -652,7 +671,7 @@ class TestAggregation(AdapterCase):
         )
         conn.commit()
         conn.close()
-        start, end = bounds_of("1d", self.now)
+        start, end = bounds_of("1d", self.end)
         k = model.kpis(start, end)
         # Only today's row is in the window. Yesterday's is outside it and is
         # not reported anywhere: the board shows one total, and a second figure
@@ -679,7 +698,7 @@ class TestAggregation(AdapterCase):
         )
         ocut.commit()
         ocut.close()
-        self.assertEqual(model.kpis(0, self.now).active_days, 2)
+        self.assertEqual(model.kpis(0, self.end).active_days, 2)
 
     def test_average_duration_ignores_null_measurements(self):
         conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True)
@@ -692,7 +711,7 @@ class TestAggregation(AdapterCase):
         )
         conn.commit()
         conn.close()
-        rows = {row.name: row for row in model.entity_rows("skills", 0, self.now)}
+        rows = {row.name: row for row in model.entity_rows("skills", 0, self.end)}
         self.assertAlmostEqual(rows["x"].avg_ms, 1000)
         self.assertEqual(rows["x"].measured_calls, 1)
         self.assertIsNone(rows["unmeasured"].avg_ms)
@@ -708,21 +727,21 @@ class TestAggregation(AdapterCase):
         )
         conn.commit()
         conn.close()
-        row = model.token_rows(0, self.now)[0]
+        row = model.token_rows(0, self.end)[0]
         self.assertEqual(row.model, "(unknown)")
         self.assertEqual(row.total, 50)
-        self.assertEqual(model.model_stats(None, ("(unknown)",), 0, self.now),
+        self.assertEqual(model.model_stats(None, ("(unknown)",), 0, self.end),
                          (50, 1))
-        calls = model.model_calls(None, ("(unknown)",), 0, self.now)
+        calls = model.model_calls(None, ("(unknown)",), 0, self.end)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0].total, 50)
 
     def test_entity_drilldown_reads_every_spelling(self):
         self._two_sources()
-        row = next(r for r in model.entity_rows("tools", 0, self.now)
+        row = next(r for r in model.entity_rows("tools", 0, self.end)
                    if r.name.casefold() == "read")
         self.assertEqual({name.casefold() for name in row.spellings}, {"read"})
-        calls = model.entity_calls("tools", row.spellings, 0, self.now)
+        calls = model.entity_calls("tools", row.spellings, 0, self.end)
         self.assertEqual(len(calls), 3)
         self.assertEqual({call.source for call in calls}, {"cbut", "ocut"})
         self.assertTrue(all(call.total is None and call.duration_ms is not None
@@ -730,21 +749,21 @@ class TestAggregation(AdapterCase):
 
     def test_entity_detail_keeps_status_and_duration_apart(self):
         self._two_sources()
-        row = model.entity_rows("skills", 0, self.now)[0]
-        calls = model.entity_calls("skills", row.spellings, 0, self.now)
+        row = model.entity_rows("skills", 0, self.end)[0]
+        calls = model.entity_calls("skills", row.spellings, 0, self.end)
         self.assertEqual({call.status for call in calls},
                          {"completed", "error"})
         self.assertEqual(sorted(call.duration_ms for call in calls),
                          [1000, 2000, 3000])
 
     def test_day_labels_are_capped(self):
-        labels = model.day_labels(0, self.now, max_days=30)
+        labels = model.day_labels(0, self.end, max_days=30)
         self.assertEqual(len(labels), 30)
-        self.assertEqual(labels[-1], date.fromtimestamp(self.now / 1000).isoformat())
+        self.assertEqual(labels[-1], date.fromtimestamp(self.end / 1000).isoformat())
 
     def test_ocut_project_uses_the_directory_not_the_hash(self):
         self._two_sources()
-        rows = model.call_rows(0, self.now)
+        rows = model.call_rows(0, self.end)
         self.assertEqual({r.project for r in rows if r.source == "ocut"}, {"/p/two"})
 
 
@@ -1208,7 +1227,7 @@ class TestUsageCollapse(unittest.TestCase):
         self.assertEqual(rows[1].total, 15)
 
 
-class TestHardening(unittest.TestCase):
+class TestHardening(ClockMixin, unittest.TestCase):
     """The four failures the audit found behind a screen that looked fine."""
 
     def setUp(self) -> None:
@@ -1259,7 +1278,7 @@ class TestHardening(unittest.TestCase):
         # `provider` is read by aut_model only; the source's own snapshot never
         # touched it, so this used to read "ok" with an empty Tokens tab.
         _db(self.home, "codebuddy-usage-tracker", CBUT_DDL.replace("provider TEXT,", ""))
-        snap = BY_KEY["cbut"].snapshot(1, self.now)
+        snap = BY_KEY["cbut"].snapshot(1, self.end)
         self.assertEqual(snap.status, "error")
         self.assertIn("provider", snap.note)
 
@@ -1267,7 +1286,7 @@ class TestHardening(unittest.TestCase):
         conn = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL)
         conn.executescript(CBUT_ENTITIES.replace("status TEXT,", ""))
         conn.close()
-        self.assertEqual(model.entity_rows("tools", None, self.now), [])
+        self.assertEqual(model.entity_rows("tools", None, self.end), [])
         self.assertIn("cbut", model.source_errors())
 
     def test_an_index_without_a_usage_flag_is_not_vouched_for(self):
@@ -1281,7 +1300,7 @@ class TestHardening(unittest.TestCase):
         )
         conn.commit()
         conn.close()
-        snap = BY_KEY["cbut"].snapshot(1, self.now)
+        snap = BY_KEY["cbut"].snapshot(1, self.end)
         self.assertEqual(snap.status, "ok")
         self.assertEqual(snap.tokens, 15)
         self.assertFalse(snap.tokens_real)
@@ -1293,7 +1312,7 @@ class TestHardening(unittest.TestCase):
         source = BY_KEY["cbut"]
         with mock.patch.object(type(source), "_read",
                                side_effect=ValueError("invalid literal: 'abc'")):
-            snap = source.snapshot(1, self.now)
+            snap = source.snapshot(1, self.end)
         self.assertEqual(snap.status, "error")
         self.assertIn("abc", snap.note)
 
@@ -1315,14 +1334,14 @@ class TestHardening(unittest.TestCase):
             return real(path)
 
         with mock.patch.object(model, "open_ro", counting):
-            model.kpis(None, self.now)
-            model.token_rows(None, self.now)
+            model.kpis(None, self.end)
+            model.token_rows(None, self.end)
             separate = len(opened)
             opened.clear()
             with model.read_session():
-                model.kpis(None, self.now)
-                model.token_rows(None, self.now)
-                model.entity_rows("tools", None, self.now)
+                model.kpis(None, self.end)
+                model.token_rows(None, self.end)
+                model.entity_rows("tools", None, self.end)
             together = len(opened)
         self.assertEqual(separate, 2)
         self.assertEqual(together, 1)

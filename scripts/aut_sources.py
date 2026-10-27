@@ -152,7 +152,7 @@ class Source:
             f"SELECT SUM({self.expr_total}), SUM({self.cost_expr}), COUNT(*),"
             f" COUNT(DISTINCT session_id), AVG({self.real_col}),"
             f" SUM(CASE WHEN {self.expr_total} IS NULL THEN 1 ELSE 0 END)"
-            f" FROM {self.table} WHERE ts >= ? AND ts <= ?",
+            f" FROM {self.table} WHERE ts >= ? AND ts < ?",
             (since, end),
         ).fetchone()
 
@@ -177,7 +177,9 @@ class Source:
         # The last event is the index's own last event up to the window end, not
         # the last one inside the selected window: a tracker used last month is
         # idle, not "never". Bounding by `end` keeps a historical view from
-        # seeing calls that happened after the window it is showing.
+        # seeing calls that happened after the window it is showing. Inclusive on
+        # purpose: every other query here is [start, end), but this one is not a
+        # window total -- it asks which event was last, not what falls inside.
         last_ts = conn.execute(
             f"SELECT MAX(ts) FROM {self.table} WHERE ts <= ?", (end,)
         ).fetchone()[0]
@@ -186,7 +188,7 @@ class Source:
         bucket_since = end - width * DAY_MS
         rows = conn.execute(
             f"SELECT date(ts/1000,'unixepoch','localtime') AS d, SUM({self.expr_total})"
-            f" FROM {self.table} WHERE ts >= ? AND ts <= ? GROUP BY d",
+            f" FROM {self.table} WHERE ts >= ? AND ts < ? GROUP BY d",
             (bucket_since, end),
         ).fetchall()
         by_day = {row[0]: int(row[1] or 0) for row in rows}
@@ -230,7 +232,7 @@ class Source:
         expr = self.expr_project if column == "project" else column
         rows = conn.execute(
             f"SELECT {expr}, SUM({self.expr_total}) AS t FROM {self.table}"
-            f" WHERE ts >= ? AND ts <= ? AND {expr} IS NOT NULL AND {expr} != ''"
+            f" WHERE ts >= ? AND ts < ? AND {expr} IS NOT NULL AND {expr} != ''"
             f" GROUP BY {expr} ORDER BY t DESC LIMIT 3",
             (since, end),
         ).fetchall()

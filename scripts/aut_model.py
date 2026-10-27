@@ -142,8 +142,14 @@ class Kpis:
 # --- plumbing ---------------------------------------------------------------
 
 def _where(start_ms: int | None, end_ms: int):
-    """A bound pair usable with one parameter repeated twice for NULL = all time."""
-    return "(? IS NULL OR ts >= ?) AND ts <= ?", (start_ms, start_ms, end_ms)
+    """A bound pair usable with one parameter repeated twice for NULL = all time.
+
+    The window is [start, end): the end is exclusive, matching what all three
+    trackers' own q_usage_summary filters do. An inclusive end made the board
+    count a call at exactly `now` that the tracker under it had already left
+    out, so one screen could show two totals a single row apart.
+    """
+    return "(? IS NULL OR ts >= ?) AND ts < ?", (start_ms, start_ms, end_ms)
 
 
 # The connections `read_session()` opened for the current block, if any. A
