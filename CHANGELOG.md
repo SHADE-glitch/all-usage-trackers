@@ -13,6 +13,40 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+## D-009 · 2026-10-27 · guard
+
+**Symptom** — the cross-repo golden fixture pinned each tracker's own answer to one input set,
+but never the *seam*: nothing checked that the board reads those same rows and gets the same
+number. It did not. `aut` filtered every window as `ts <= end`, while all three trackers filter
+their own as `ts >= start AND ts < end` (`cbut_db._ts_where`, `ocut_db._ts_where`). A call
+sitting exactly on the clock instant was therefore inside the board's window and outside the
+tracker's — the same class of disagreement D-008 fixed one layer up.
+
+**Change** — `scripts/tests/test_family_contract.py` inserts the fixture's 21 rows into each
+tracker's own DDL, reads them back through `aut_model`, and asserts every per-row total, every
+preset's windowed total and request count, and every `(model, provider)` rollup against the
+numbers the trackers themselves computed. No expectation is re-derived in the test. The half-open
+window is now the board's rule too: `_where` and the three window aggregates in `aut_sources`
+(`snapshot`, the sparkline buckets, `_top`) use `<`. `SELECT MAX(ts) WHERE ts <= end` stays
+inclusive on purpose — it answers "the index's last event as of here", not "the total in this
+window". The aut tests separate the two names: `self.now` anchors the fixture rows, `self.end`
+(`ClockMixin`) is the window end one millisecond later.
+
+**The one table all four repositories copy** — `USAGE_RANGES` is now a `family_contract` block
+in the golden fixture, asserted by aut and by each tracker's own copy of
+`test_cross_repo_golden.py`. A preset added on one side and not the other makes `7d` mean two
+things and neither repository fails on its own.
+
+**Corrected in the fixture** — `model_groups["step-3"].requests` read `17`; `cbut`'s own
+`q_usage_model_stats` says `18` over the same window. The field had never been asserted by the
+trackers' tests (they pin `usage_total_tokens` only), so it had drifted from the rows it
+describes. Fixed in the canonical file, re-copied byte-for-byte to all three trackers, and
+`CANONICAL_SHA256` updated in all four.
+
+**Verified** — aut 83 tests, cbut 592, ocut 504, qcut 424, all green. aut's all-time CodeBuddy
+total is still `10,912,133,700`, unchanged by the boundary move (no real row lands on the clock
+instant; the change removes a theoretical double-count, not a measured one).
+
 ## D-008 · 2026-10-27 · fix
 
 **Symptom** — with **All time** (and any window containing one of them) the Tokens tab showed

@@ -177,6 +177,7 @@ scripts/aut_app.py          Textual 看板：tab、绑定、底栏
 scripts/aut_picker.py       家族的时间范围选择器
 scripts/aut_report.py       JSON 视图
 scripts/tests/test_aut.py   套件（临时 HOME 里的夹具库）
+scripts/tests/test_family_contract.py  看板必须读出三家自己的数字
 docs/maintenance/           三家契约——每个适配器假定了什么
 docs/audit/                 按日期归档的只读审计报告（是快照，不是当前状态）
 ```
