@@ -57,11 +57,10 @@ now pins the opposite: the row outside the window is counted nowhere, and the da
 field to put it in. README's Dashboard row and both mock lines lost the segment; the box keeps its
 width.
 
-**Still open (not changed on purpose)** — for a window of seven days or more, one row whose
-`usage_available` is 0 sets `tokens` to `None` for the whole window, so the card falls back to
-"token usage not reported in this window" even though most rows did report. Fixing it means deciding
-what a partially-measured total should say, which is a rule change, not a bug fix; the owner asked
-for the total to stay as it is.
+**Closed by D-008 the same day** — a window of seven days or more used to fall back to "token usage
+not reported in this window" because one unmeasured row set `tokens` to `None` for the whole
+window. That was the same defect D-008 fixes, so the fallback now only appears when *every* row in
+the window is unmeasured. The paragraph stays so the two entries read in order.
 
 ## D-006 · 2026-10-25 · chore
 
