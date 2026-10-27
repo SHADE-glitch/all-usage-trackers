@@ -5,6 +5,11 @@ Guidance for AI coding agents working in this repository.
 > **Dimension.** A — open source (strict), per `CONVENTIONS.md` §0; the shared rules live once in
 > `~/.agents/standards/STANDARD.md` and the dimension-A detail in
 > `~/.agents/standards/dimensions/a.md`. Neither is restated here.
+>
+> **Read these before the first edit** (bare `@` imports — CodeBuddy expands them; opencode reads
+> the same two from `opencode.json`):
+> @~/.agents/standards/STANDARD.md
+> @~/.agents/standards/dimensions/a.md
 
 ## What this is
 
@@ -125,6 +130,13 @@ scripts/aut_db.py       read-only connections, formatting, sparkline
 scripts/aut_report.py   headless json / sync
 scripts/tests/          adapters + aggregation against temp databases, board smoke tests
 ```
+
+## Docs & commits
+
+- **Docs are bilingual**: `README.md` (English, landing page) and `README.zh-CN.md` (Chinese).
+  Edit both together and keep section order aligned; a section added on one side alone is drift.
+- Commit messages are **English** and follow Conventional Commits (`feat:` / `fix:` / `docs:` /
+  `chore:`), code before docs.
 
 ## Recording conventions
 
