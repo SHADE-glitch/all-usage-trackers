@@ -5,6 +5,7 @@
 #   aut cbut|ocut|qcut  jump straight into that tracker's own TUI
 #   aut sync [KEY...]   run the trackers' own sync commands (default: all three)
 #   aut json [--days N] print the combined snapshot as JSON (1 / 7 / 30 / 0=all)
+#   aut skills [--days N] print skill usage across the three (default 30 days)
 #   aut --help          this text
 #
 # The overview never parses a log and never writes a database: it reads the SQLite
@@ -48,7 +49,7 @@ fi
 
 case "$cmd" in
   tui|"")   shift || true; exec "$PY" "$SCRIPTS/aut_app.py" "$@" ;;
-  json|sync) shift || true; exec "$PY" "$SCRIPTS/aut_report.py" "$cmd" "$@" ;;
+  json|sync|skills) shift || true; exec "$PY" "$SCRIPTS/aut_report.py" "$cmd" "$@" ;;
   cbut|ocut|qcut)
     shift || true
     if ! command -v "$cmd" >/dev/null 2>&1; then

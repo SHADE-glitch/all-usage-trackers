@@ -109,13 +109,13 @@
 
 ## 📋 依赖
 
-- Python 3.11+（看板唯一的依赖是 Textual；`aut json` 与 `aut sync` 是纯标准库）。
+- Python 3.11+（看板唯一的依赖是 Textual；`aut json`、`aut skills` 与 `aut sync` 是纯标准库）。
 - `cbut`、`ocut`、`qcut` 里至少装好并同步过一家。
 
 | 组件 | 版本 | 说明 |
 | :--- | :--- | :--- |
 | Python | 3.11+ | 下限是 `pyproject.toml` 里的 `requires-python`；CI 覆盖 3.11 与 3.14 |
-| Textual | 见 `requirements.txt` | 只有看板需要；`json` / `sync` 不需要任何第三方包 |
+| Textual | 见 `requirements.txt` | 只有看板需要；`json` / `skills` / `sync` 不需要任何第三方包 |
 | Linux | 任意 | 读 `~/.local/share/*/usage.db` |
 
 ## 📥 安装
@@ -138,10 +138,11 @@ aut cbut             # 直接进某家追踪器自己的 TUI
 aut sync             # 跑三家自己的同步命令
 aut sync cbut ocut   # ……或者只同步其中几家
 aut json --days 7    # 与看板同源的数字，输出 JSON
+aut skills --days 30 # Skills 页的无终端版本
 aut --help
 ```
 
-`aut json` 的 `--days` 接受 `1` / `7` / `30` / `0`（= 全部），其它值会被拒绝而不是被悄悄改成 7；它是纯标准库，不需要 venv——这正是它能被脚本直接调用的原因。
+`aut json` 的 `--days` 接受 `1` / `7` / `30` / `0`（= 全部），其它值会被拒绝而不是被悄悄改成 7；它是纯标准库，不需要 venv——这正是它能被脚本直接调用的原因。`aut skills` 读的就是 Skills 页用的同一个 `entity_rows`，默认 30 天（skill 调用本就稀少），读不到的追踪器会被点名，而不是印一个 0。
 
 ## 🧯 故障排查
 
@@ -175,7 +176,7 @@ scripts/aut_model.py        每个 tab 都在画的跨工具聚合（纯函数�
 scripts/aut_chart.py        文本条与百分比
 scripts/aut_app.py          Textual 看板：tab、绑定、底栏
 scripts/aut_picker.py       家族的时间范围选择器
-scripts/aut_report.py       JSON 视图
+scripts/aut_report.py       无终端的几个视图：json / skills / sync
 scripts/tests/test_aut.py   套件（临时 HOME 里的夹具库）
 scripts/tests/test_family_contract.py  看板必须读出三家自己的数字
 docs/maintenance/           三家契约——每个适配器假定了什么

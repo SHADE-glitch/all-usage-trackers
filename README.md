@@ -109,13 +109,13 @@ The screen is laid out like the three trackers: the state line (rows, sort, grou
 
 ## 📋 Requirements
 
-- Python 3.11+ (the board's only dependency is Textual; `aut json` and `aut sync` are pure standard library).
+- Python 3.11+ (the board's only dependency is Textual; `aut json`, `aut skills` and `aut sync` are pure standard library).
 - At least one of `cbut`, `ocut`, `qcut` installed and synced.
 
 | Component | Version | Notes |
 | :--- | :--- | :--- |
 | Python | 3.11+ | the floor is `requires-python` in `pyproject.toml`; CI covers 3.11 and 3.14 |
-| Textual | see `requirements.txt` | board only — `json` / `sync` need no third-party package |
+| Textual | see `requirements.txt` | board only — `json` / `skills` / `sync` need no third-party package |
 | Linux | any | reads `~/.local/share/*/usage.db` |
 
 ## 📥 Install
@@ -138,10 +138,11 @@ aut cbut             # jump straight into one tracker's own TUI
 aut sync             # run the three trackers' own sync commands
 aut sync cbut ocut   # …or only some of them
 aut json --days 7    # the numbers the board draws, as JSON
+aut skills --days 30 # the Skills tab without the terminal
 aut --help
 ```
 
-`aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` — anything else is refused, not silently rounded to 7 — and is stdlib-only, so it works without the venv, which is what makes it usable from a script.
+`aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` — anything else is refused, not silently rounded to 7 — and is stdlib-only, so it works without the venv, which is what makes it usable from a script. `aut skills` reads the same `entity_rows` the Skills tab does, defaults to 30 days (skills are rare), and names each tracker it could not read instead of printing a zero.
 
 ## 🧯 Troubleshooting
 
@@ -175,7 +176,7 @@ scripts/aut_model.py         the cross-tool aggregation every tab draws (pure, n
 scripts/aut_chart.py         text bars and percentages
 scripts/aut_app.py           the Textual board: tabs, bindings, footer
 scripts/aut_picker.py        the family's date-range picker
-scripts/aut_report.py        the JSON view
+scripts/aut_report.py        the headless views: json / skills / sync
 scripts/tests/test_aut.py    the suite (fixture databases in a temp HOME)
 scripts/tests/test_family_contract.py  the board must read the trackers’ own numbers
 docs/maintenance/            the tracker contracts — what each adapter assumes

@@ -29,7 +29,7 @@ A **read-only** six-tab board over the local usage trackers: `cbut` (CodeBuddy),
    the tracker family (same 79x30 layout, same chips). Kept in its own file so
    the board stays about the board.
 5. `scripts/aut_app.py` — the Textual board: top bar, six panes, detail screens.
-6. `scripts/aut_report.py` — `aut json` and `aut sync`.
+6. `scripts/aut_report.py` — `aut json`, `aut skills` and `aut sync`.
 
 `bin/aut` is a bash dispatcher. **It is bash on purpose**: it must still run and
 print a useful error when the venv is missing or broken.
@@ -114,20 +114,21 @@ This repository is public.
 ./install.sh                                  # venv + ~/.local/bin/aut symlink
 python3 -m unittest discover -s scripts/tests # stdlib unittest; pytest discovers them too
 ./bin/aut json --days 7                       # the snapshot, as JSON
+./bin/aut skills --days 30                    # skill usage without the TUI
 ./bin/aut cbut                                # jump straight into one tracker
 ```
 
 ## Layout
 
 ```
-bin/aut                 bash dispatcher: tui | cbut/ocut/qcut | json | sync | --help
+bin/aut                 bash dispatcher: tui | cbut/ocut/qcut | json | skills | sync | --help
 scripts/aut_sources.py  the adapters (SOURCES) and the Snapshot shape
 scripts/aut_model.py    cross-tool aggregation: tokens, entities, timeline, kpis
 scripts/aut_picker.py   the custom date-range picker (ported from the family)
 scripts/aut_app.py      the Textual board: six panes + two detail screens
 scripts/aut_chart.py    the share bar and its percentage, shared by every pane
 scripts/aut_db.py       read-only connections, formatting, sparkline
-scripts/aut_report.py   headless json / sync
+scripts/aut_report.py   headless json / skills / sync
 scripts/tests/          adapters + aggregation against temp databases, board smoke tests
 ```
 

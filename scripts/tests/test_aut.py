@@ -8,6 +8,7 @@ is where the numbers come from.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import sqlite3
@@ -1227,6 +1228,71 @@ class TestUsageCollapse(unittest.TestCase):
         self.assertEqual(rows[1].total, 15)
 
 
+class TestSkillsReport(AdapterCase):
+    """`aut skills` is the Skills tab without a terminal."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        model._ERRORS.clear()
+        self.addCleanup(model._ERRORS.clear)
+
+    def _seed(self) -> None:
+        cbut = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True)
+        cbut.executemany(
+            "INSERT INTO skill_usage (call_id, skill, session_id, project, ts, status, duration_ms)"
+            " VALUES (?,?,?,?,?,?,?)",
+            [("k1", "code-review", "s1", "/p", self.now, "completed", 1000),
+             ("k2", "Code-Review", "s1", "/p", self.now, "error", 3000)],
+        )
+        cbut.commit()
+        cbut.close()
+        ocut = _db(self.home, "opencode-usage-tracker", OCUT_DDL, entities=True)
+        ocut.execute(
+            "INSERT INTO skill_usage (call_id, skill, session_id, project, ts, status, duration_ms)"
+            " VALUES (?,?,?,?,?,?,?)",
+            ("k3", "code-review", "s2", "/p", self.now, "completed", 2000),
+        )
+        ocut.commit()
+        ocut.close()
+
+    def _run(self, days: int = 30) -> str:
+        import aut_report
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = aut_report.main(["skills", "--days", str(days)])
+        self.assertEqual(code, 0)
+        return buf.getvalue()
+
+    def test_one_skill_is_one_row_across_trackers(self):
+        self._seed()
+        out = self._run()
+        rows = [line for line in out.splitlines() if line.startswith("code-review")]
+        self.assertEqual(len(rows), 1)
+        # calls 3 (cbut 2 + ocut 1), ok 2, fail 1 — the row the TUI draws.
+        self.assertRegex(rows[0], r"3\s+2\s+1\s+—\s+2\s+1")
+        self.assertIn("1 skills · 3 calls", out)
+
+    def test_a_missing_source_is_named_not_counted_as_zero(self):
+        self._seed()
+        out = self._run()
+        self.assertIn("cbut ok", out)
+        self.assertIn("ocut ok", out)
+        self.assertIn("qcut missing", out)
+
+    def test_an_empty_window_says_so(self):
+        cbut = _db(self.home, "codebuddy-usage-tracker", CBUT_DDL, entities=True)
+        cbut.execute(
+            "INSERT INTO skill_usage (call_id, skill, session_id, project, ts, status, duration_ms)"
+            " VALUES (?,?,?,?,?,?,?)",
+            ("k1", "code-review", "s1", "/p", self.now - 3 * DAY_MS, "completed", 1000),
+        )
+        cbut.commit()
+        cbut.close()
+        out = self._run(days=1)
+        self.assertIn("no skill calls in this window", out)
+
+
 class TestHardening(ClockMixin, unittest.TestCase):
     """The four failures the audit found behind a screen that looked fine."""
 
@@ -1257,6 +1323,10 @@ class TestHardening(ClockMixin, unittest.TestCase):
             "with contextlib.redirect_stdout(buf):\n"
             "    rc = aut_report.main(['json', '--days', '1'])\n"
             "print(rc, len(json.loads(buf.getvalue())['sources']))\n"
+            "buf = io.StringIO()\n"
+            "with contextlib.redirect_stdout(buf):\n"
+            "    rc = aut_report.main(['skills', '--days', '1'])\n"
+            "print(rc, 'no skill calls' in buf.getvalue())\n"
         )
         out = subprocess.run(
             [sys.executable, "-c", code], cwd=str(scripts),
@@ -1264,7 +1334,7 @@ class TestHardening(ClockMixin, unittest.TestCase):
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertEqual(out.stdout.split(), ["0", "3"], out.stderr)
+        self.assertEqual(out.stdout.split(), ["0", "3", "0", "True"], out.stderr)
 
     def test_a_hostile_name_is_literal_text_not_markup(self):
         from aut_app import _cell
