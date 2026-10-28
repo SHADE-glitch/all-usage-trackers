@@ -76,7 +76,9 @@ def cmd_skills(args: argparse.Namespace) -> int:
     start, end = _window(args.days)
     with model.read_session():
         rows = model.entity_rows("skills", start, end)
-    rows.sort(key=lambda row: (-row.calls, row.name.casefold()))
+        read_states = model.skill_read_states()
+    rows.sort(key=lambda row: (-(row.calls + (row.reads or 0)),
+                               row.name.casefold()))
 
     label = RANGE_LABELS.get("all" if args.days <= 0 else f"{args.days}d",
                              f"{args.days} days")
@@ -89,17 +91,28 @@ def cmd_skills(args: argparse.Namespace) -> int:
 
     if rows:
         name_w = max(len("skill"), *(len(row.name) for row in rows))
-        print(f"{'skill':<{name_w}}  {'calls':>6}  {'cbut':>6}  {'ocut':>6}"
-              f"  {'qcut':>6}  {'ok':>4}  {'fail':>4}  {'avg':>6}  {'last used':>9}")
+        print(f"{'skill':<{name_w}}  {'calls':>6}  {'reads':>6}  {'cbut':>6}"
+              f"  {'ocut':>6}  {'qcut':>6}  {'ok':>4}  {'fail':>4}  {'avg':>6}"
+              f"  {'last used':>9}")
         for row in rows:
             per = ["—" if not row.per_source.get(key) else f"{row.per_source[key]:,}"
                    for key in ("cbut", "ocut", "qcut")]
+            reads = "—" if row.reads is None else f"{row.reads:,}"
             print(f"{row.name:<{name_w}}  {row.calls:>6,}"
+                  f"  {reads:>6}"
                   f"  {per[0]:>6}  {per[1]:>6}  {per[2]:>6}"
                   f"  {row.ok:>4,}  {row.fail:>4,}  {_fmt_avg(row.avg_ms):>6}"
                   f"  {fmt_age(row.last_used):>9}")
         calls = sum(row.calls for row in rows)
-        print(f"\n{len(rows)} skills · {calls:,} calls")
+        unavailable = [key for key, state in read_states.items()
+                       if state not in ("ok", "missing")]
+        if unavailable:
+            tail = ("direct reads unavailable: "
+                    + ", ".join(f"{key} ({read_states[key]})"
+                                for key in unavailable))
+        else:
+            tail = f"{sum(row.reads or 0 for row in rows):,} reads"
+        print(f"\n{len(rows)} skills · {calls:,} calls · {tail}")
     else:
         print("no skill calls in this window")
 

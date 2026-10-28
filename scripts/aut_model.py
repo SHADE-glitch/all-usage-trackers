@@ -111,6 +111,10 @@ class EntityRow:
     # Calls with a measured duration. The average's denominator is this, not
     # calls: a NULL duration is not a zero-millisecond call.
     measured_calls: int = 0
+    # Direct reads of the skill card (`Read .../SKILL.md`), from skill_reads.
+    # None means at least one readable tracker has no such table yet — a floor
+    # would be a number, and this is "not answered", not "zero".
+    reads: int | None = None
 
 
 @dataclass(slots=True)
@@ -355,6 +359,87 @@ def by_source(rows: list[TokenRow]) -> list[TokenRow]:
 
 # --- entities (skills / tools) ----------------------------------------------
 
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _merge_skill_reads(merged: dict[str, EntityRow],
+                       spellings: dict[str, dict[str, int]],
+                       start_ms: int | None, end_ms: int) -> bool:
+    """Fold `skill_reads` into the skill rows; False when a source cannot answer.
+
+    A tracker that has not upgraded yet has no `skill_reads` table. That source
+    contributes an unknown, not a zero: the row's read count becomes None and
+    the caller says why. A source without an index at all is simply absent, the
+    same way it is for calls.
+    """
+    where, params = _where(start_ms, end_ms)
+    known = True
+    for source in SOURCES:
+        conn = _connect(source)
+        if conn is None:
+            continue
+        try:
+            if not _table_exists(conn, source.reads_table):
+                known = False
+                continue
+            rows = conn.execute(
+                f"SELECT {source.reads_skill_expr}, COUNT(*), MAX(ts)"
+                f" FROM {source.reads_table} WHERE {where} GROUP BY 1",
+                params,
+            ).fetchall()
+        except sqlite3.Error as exc:
+            _ERRORS[(source.key, "skill_reads")] = str(exc)
+            known = False
+            continue
+        finally:
+            _close(conn)
+        for name, count, last in rows:
+            name = str(name)
+            merge_key = name.casefold()
+            target = merged.get(merge_key)
+            if target is None:
+                target = merged[merge_key] = EntityRow(name=name)
+                spellings[merge_key] = {}
+            seen = spellings[merge_key]
+            seen[name] = seen.get(name, 0) + int(count or 0)
+            target.reads = (target.reads or 0) + int(count or 0)
+            if last is not None:
+                ts = int(last)
+                target.last_used = (ts if target.last_used is None
+                                    else max(target.last_used, ts))
+    return known
+
+
+def skill_read_states() -> dict[str, str]:
+    """Per source: ok | missing | no table | error. Why a read count is unknown."""
+    out: dict[str, str] = {}
+    for source in SOURCES:
+        if not source.db_path.is_file():
+            out[source.key] = "missing"
+            continue
+        conn = _connect(source)
+        if conn is None:
+            out[source.key] = "error"
+            continue
+        try:
+            has_table = _table_exists(conn, source.reads_table)
+        except sqlite3.Error as exc:
+            out[source.key] = f"error ({exc})"
+            continue
+        finally:
+            _close(conn)
+        if not has_table:
+            out[source.key] = "no table"
+        elif source.key in source_errors():
+            out[source.key] = "error"
+        else:
+            out[source.key] = "ok"
+    return out
+
+
 def entity_rows(kind: str, start_ms: int | None, end_ms: int) -> list[EntityRow]:
     table, name_col = ENTITY_TABLES[kind]
     ok_list = ", ".join(f"'{s}'" for s in OK_STATUSES)
@@ -404,6 +489,17 @@ def entity_rows(kind: str, start_ms: int | None, end_ms: int) -> list[EntityRow]
         if r[5] is not None:
             ts = int(r[5])
             target.last_used = ts if target.last_used is None else max(target.last_used, ts)
+
+    if kind == "skills":
+        # A read-only skill (never invoked through the Skill tool) is a real
+        # row: that is the case this table exists to surface. A row with no
+        # reads has a true 0 only when every readable source answered.
+        known = _merge_skill_reads(merged, spellings, start_ms, end_ms)
+        for row in merged.values():
+            if not known:
+                row.reads = None
+            elif row.reads is None:
+                row.reads = 0
 
     for merge_key, row in merged.items():
         seen = spellings[merge_key]

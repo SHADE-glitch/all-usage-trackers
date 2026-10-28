@@ -584,8 +584,8 @@ class EntityPane(TablePane):
     # more often than "what did I use most". s still cycles to calls.
     SORT_FIELDS = (("recent", "last_used", "last used"), ("calls", "calls", "calls"),
                    ("name", "name", "name"))
-    COLUMN_WIDTHS = {"name": 30, "calls": 22, "cbut": 7, "ocut": 7, "qcut": 7,
-                     "ok": 6, "fail": 5, "avg": 6, "last used": 10}
+    COLUMN_WIDTHS = {"name": 30, "calls": 22, "reads": 6, "cbut": 7, "ocut": 7,
+                     "qcut": 7, "ok": 6, "fail": 5, "avg": 6, "last used": 10}
 
     def __init__(self, kind: str) -> None:
         super().__init__()
@@ -593,6 +593,12 @@ class EntityPane(TablePane):
         self.TAB_KEY = kind
         self.COLUMNS = ("name", "calls", "cbut", "ocut", "qcut", "ok", "fail",
                         "avg", "last used")
+        if kind == "skills":
+            # Invocations and direct reads are two mechanisms, so they get two
+            # columns; folding them would turn "how often was it invoked" into a
+            # number that also counts file opens.
+            self.COLUMNS = ("name", "calls", "reads", "cbut", "ocut", "qcut",
+                            "ok", "fail", "avg", "last used")
         self._total_calls = 0
         self._max_calls = 0
 
@@ -617,7 +623,7 @@ class EntityPane(TablePane):
         calls = Text(f"{row.calls:>6} ")
         calls.append_text(share_bar(row.calls, self._max_calls, width=8))
         calls.append(f" {pct(row.calls, self._total_calls):>3}")
-        return {
+        cells = {
             "name": _cell(row.name),
             "calls": calls,
             "cbut": per("cbut"),
@@ -628,6 +634,9 @@ class EntityPane(TablePane):
             "avg": _avg(row.avg_ms),
             "last used": fmt_age(row.last_used),
         }
+        if self.kind == "skills":
+            cells["reads"] = ("—" if row.reads is None else f"{row.reads:,}")
+        return cells
 
     def extra_note(self) -> str:
         shared = sum(1 for r in self._rows

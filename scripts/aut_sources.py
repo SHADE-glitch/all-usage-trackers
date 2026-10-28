@@ -70,6 +70,12 @@ class Source:
     # OpenCode stores a hashed project id and the directory beside it, so the
     # path has to be named explicitly; the other two put the path in 'project'.
     expr_project: str
+    # Direct skill-card reads: the trackers keep them in their own table, one row
+    # per Read of `.../SKILL.md`. The shape is uniform today, but it is named here
+    # because this file is the only one allowed to know a schema — a tracker that
+    # renames the table or its name column edits one row here.
+    reads_table: str = "skill_reads"
+    reads_skill_expr: str = "COALESCE(skill, '(unknown)')"
 
     @property
     def db_path(self) -> Path:

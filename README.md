@@ -33,7 +33,7 @@
 | :--- | :--- |
 | **Dashboard** | the window's usage total, sessions and calls, top models and top skills as two cards that grow with their rows and fill the pane (the pane scrolls once the lists no longer fit), and the window caption. A model row carries its origin — which tracker(s) the merged number came from |
 | **Tools** | one row per tool, with the calls each tracker made, ok / fail, average duration and last use |
-| **Skills** | the same shape for skills — the one place a skill's use in CodeBuddy and OpenCode sits on one line |
+| **Skills** | the same shape for skills, plus a column for direct reads of a `SKILL.md` — the one place a skill's invocation in CodeBuddy and OpenCode, and its direct reads, sit on one line |
 | **Tokens** | **one row per model**, merged across trackers by name, with a column per tracker; `g` cycles to model × tracker (the usage total first, then the input / output / cache split it is made of), then one row per tracker. One model recorded under two spellings — dots here, hyphens there, a free route, Qoder's internal ids — is one row; the detail names the spellings it folded and lists each call under the one its tracker wrote. A total marked `*` is the sum of the calls that reported one — the rest of the window carried no usage block, and the caption says so |
 | **Usage** | the most recent calls from all three in one timeline; identical calls within a minute share a row (`×26`), so the list shows turns rather than rows |
 | **Sources** | each tracker's health, share of the window's tokens, index size and 7-day trend; `enter` opens that tracker's own TUI |
@@ -142,7 +142,7 @@ aut skills --days 30 # the Skills tab without the terminal
 aut --help
 ```
 
-`aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` — anything else is refused, not silently rounded to 7 — and is stdlib-only, so it works without the venv, which is what makes it usable from a script. `aut skills` reads the same `entity_rows` the Skills tab does, defaults to 30 days (skills are rare), and names each tracker it could not read instead of printing a zero.
+`aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` — anything else is refused, not silently rounded to 7 — and is stdlib-only, so it works without the venv, which is what makes it usable from a script. `aut skills` reads the same `entity_rows` the Skills tab does, defaults to 30 days (skills are rare), and names each tracker it could not read instead of printing a zero. Direct reads come from each tracker's `skill_reads` table; a tracker that predates it shows `—` and is named under "direct reads unavailable", never a 0.
 
 ## 🧯 Troubleshooting
 

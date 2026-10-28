@@ -57,6 +57,10 @@ CREATE TABLE skill_usage (
     call_id TEXT PRIMARY KEY, skill TEXT, has_args INTEGER DEFAULT 0, plugin TEXT,
     session_id TEXT, project TEXT, ts INTEGER, status TEXT, duration_ms INTEGER
 );
+CREATE TABLE skill_reads (
+    call_id TEXT PRIMARY KEY, skill TEXT, session_id TEXT, project TEXT,
+    ts INTEGER, status TEXT, duration_ms INTEGER
+);
 CREATE TABLE tool_calls (
     call_id TEXT PRIMARY KEY, session_id TEXT, project TEXT, tool_name TEXT,
     category TEXT, ts INTEGER, duration_ms INTEGER, status TEXT, model TEXT
@@ -65,6 +69,10 @@ CREATE TABLE tool_calls (
 
 OCUT_ENTITIES = """
 CREATE TABLE skill_usage (
+    call_id TEXT PRIMARY KEY, skill TEXT, session_id TEXT, project TEXT,
+    ts INTEGER, status TEXT, duration_ms INTEGER
+);
+CREATE TABLE skill_reads (
     call_id TEXT PRIMARY KEY, skill TEXT, session_id TEXT, project TEXT,
     ts INTEGER, status TEXT, duration_ms INTEGER
 );
@@ -79,6 +87,10 @@ QCUT_ENTITIES = """
 CREATE TABLE skill_usage (
     call_id TEXT PRIMARY KEY, skill TEXT, plugin TEXT, session_id TEXT,
     project TEXT, ts INTEGER, status TEXT, duration_ms INTEGER
+);
+CREATE TABLE skill_reads (
+    call_id TEXT PRIMARY KEY, skill TEXT, session_id TEXT, project TEXT,
+    ts INTEGER, status TEXT, duration_ms INTEGER
 );
 CREATE TABLE tool_calls (
     call_id TEXT PRIMARY KEY, session_id TEXT, project TEXT, tool_name TEXT,
@@ -636,6 +648,59 @@ class TestAggregation(AdapterCase):
         self.assertEqual((row.ok, row.fail), (2, 1))
         # 1s, 3s, 2s weighted by calls -> 2s
         self.assertAlmostEqual(row.avg_ms, 2000)
+
+    def test_skill_reads_fold_into_the_same_row(self):
+        self._two_sources()
+        cbut = sqlite3.connect(
+            self.home / ".local/share/codebuddy-usage-tracker/usage.db")
+        cbut.execute(
+            "INSERT INTO skill_reads (call_id, skill, session_id, project, ts,"
+            " status, duration_ms) VALUES ('r1','code-review','s1','/p',?,"
+            " 'completed',100)", (self.now,))
+        cbut.commit()
+        cbut.close()
+        ocut = sqlite3.connect(
+            self.home / ".local/share/opencode-usage-tracker/usage.db")
+        ocut.execute(
+            "INSERT INTO skill_reads (call_id, skill, session_id, project, ts,"
+            " status, duration_ms) VALUES ('r2','Code-Review','s2','/p',?,"
+            " 'completed',100)", (self.now,))
+        ocut.commit()
+        ocut.close()
+        row = model.entity_rows("skills", 0, self.end)[0]
+        self.assertEqual(row.calls, 3)
+        self.assertEqual(row.reads, 2)
+        self.assertIn("code-review", {s.casefold() for s in row.spellings})
+
+    def test_a_skill_only_ever_read_is_still_a_row(self):
+        self._two_sources()
+        cbut = sqlite3.connect(
+            self.home / ".local/share/codebuddy-usage-tracker/usage.db")
+        cbut.execute(
+            "INSERT INTO skill_reads (call_id, skill, session_id, project, ts,"
+            " status, duration_ms) VALUES ('r1','design-md','s1','/p',?,"
+            " 'completed',100)", (self.now,))
+        cbut.commit()
+        cbut.close()
+        rows = {r.name: r for r in model.entity_rows("skills", 0, self.end)}
+        self.assertIn("design-md", rows)
+        self.assertEqual((rows["design-md"].calls, rows["design-md"].reads),
+                         (0, 1))
+
+    def test_a_missing_skill_reads_table_is_unknown_not_zero(self):
+        self._two_sources()
+        cbut = sqlite3.connect(
+            self.home / ".local/share/codebuddy-usage-tracker/usage.db")
+        cbut.execute("DROP TABLE skill_reads")
+        cbut.commit()
+        cbut.close()
+        row = model.entity_rows("skills", 0, self.end)[0]
+        self.assertIsNone(row.reads,
+                          "a tracker that cannot answer is not a zero")
+        states = model.skill_read_states()
+        self.assertEqual(states["cbut"], "no table")
+        self.assertEqual(states["ocut"], "ok")
+        self.assertEqual(states["qcut"], "missing")
 
     def test_tools_merge_across_capitalisation(self):
         self._two_sources()
@@ -1269,9 +1334,35 @@ class TestSkillsReport(AdapterCase):
         out = self._run()
         rows = [line for line in out.splitlines() if line.startswith("code-review")]
         self.assertEqual(len(rows), 1)
-        # calls 3 (cbut 2 + ocut 1), ok 2, fail 1 — the row the TUI draws.
-        self.assertRegex(rows[0], r"3\s+2\s+1\s+—\s+2\s+1")
-        self.assertIn("1 skills · 3 calls", out)
+        # calls 3 (cbut 2 + ocut 1), reads 0, ok 2, fail 1 — the TUI's row.
+        self.assertRegex(rows[0], r"3\s+0\s+2\s+1\s+—\s+2\s+1")
+        self.assertIn("1 skills · 3 calls · 0 reads", out)
+
+    def test_direct_reads_get_their_own_column_and_total(self):
+        self._seed()
+        conn = sqlite3.connect(
+            self.home / ".local/share/codebuddy-usage-tracker/usage.db")
+        conn.execute(
+            "INSERT INTO skill_reads (call_id, skill, session_id, project, ts,"
+            " status, duration_ms) VALUES ('r1','code-review','s1','/p',?,"
+            " 'completed',100)", (self.now,))
+        conn.commit()
+        conn.close()
+        out = self._run()
+        row = [line for line in out.splitlines()
+               if line.startswith("code-review")][0]
+        self.assertRegex(row, r"3\s+1\s+")
+        self.assertIn("1 skills · 3 calls · 1 reads", out)
+
+    def test_a_tracker_without_the_reads_table_says_so(self):
+        self._seed()
+        conn = sqlite3.connect(
+            self.home / ".local/share/codebuddy-usage-tracker/usage.db")
+        conn.execute("DROP TABLE skill_reads")
+        conn.commit()
+        conn.close()
+        out = self._run()
+        self.assertIn("direct reads unavailable: cbut (no table)", out)
 
     def test_a_missing_source_is_named_not_counted_as_zero(self):
         self._seed()

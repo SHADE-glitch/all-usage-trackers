@@ -53,6 +53,24 @@ other — but they can drift from the tracker they claim to describe.
 | `ocut` | `NULLIF(directory, '')`, then `project` | `project` holds a hashed id; the directory is the readable one |
 | `qcut` | `project` | `cwd` lives on its `sessions` table, not on the call row |
 
+## Direct skill reads (`skill_reads`)
+
+Each tracker also records direct reads of a skill card: one row per `Read`/`read`
+tool call whose path ends in `/SKILL.md`. The table is `skill_reads` in all
+three indexes, with `call_id`, `skill`, `session_id`, `project`, `ts`, `status`
+and `duration_ms`. `skill` is the card's parent directory; the path itself is
+not stored.
+
+This is deliberately **not** folded into `skill_usage`: every existing count
+over that table answers "how many times was the skill invoked", and a read is a
+different mechanism. `aut` merges reads by name beside the calls and shows them
+in their own column.
+
+A tracker built before cbut v14 / ocut v4 / qcut v4 has no such table. The read
+count is then **unknown** — `—` beside the row and a "direct reads unavailable"
+line naming the source — never a zero. The trackers release their sync cursor on
+that upgrade, so the next sync re-reads the transcripts and backfills the reads.
+
 ## What breaks, and how it looks
 
 | Upstream change | What `aut` shows |
@@ -63,3 +81,4 @@ other — but they can drift from the tracker they claim to describe.
 | no calls in a week | `idle` — deliberately a different word from `broken` |
 | column still present but no longer written | a plausible **0** — the quiet case; only an L1 check against a copied index catches it |
 | a new token column added upstream | ignored until `expr_total` and the split columns name it |
+| `skill_reads` missing (a tracker not yet upgraded) | the reads column shows `—` and the footer says `direct reads unavailable: <key> (no table)` — not a zero |
