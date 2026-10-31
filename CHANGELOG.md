@@ -13,7 +13,21 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
-## D-009 · 2026-10-27 · guard
+### D-010 · 2026-10-31 · chore
+
+**Symptom** — the ledger used level-two headings (`## D-###`) while the other dimension-A ledgers
+use level three, and the two oldest entries sat out of order (D-001 above D-002) in a
+newest-first file. Neither broke anything; both make a cross-repo reading of the ledgers slower.
+
+**Change** — every `D-###` heading is level three, and the ledger runs D-009 down to D-001. The
+`0.x.0` release notes keep their level and their verbatim text.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests`: 91 tests, OK; nothing in the repo
+referenced the old heading level.
+
+**Cost** — none; the numbering and every entry's text are unchanged.
+
+### D-009 · 2026-10-27 · guard
 
 **Symptom** — the cross-repo golden fixture pinned each tracker's own answer to one input set,
 but never the *seam*: nothing checked that the board reads those same rows and gets the same
@@ -47,7 +61,7 @@ describes. Fixed in the canonical file, re-copied byte-for-byte to all three tra
 total is still `10,912,133,700`, unchanged by the boundary move (no real row lands on the clock
 instant; the change removes a theoretical double-count, not a measured one).
 
-## D-008 · 2026-10-27 · fix
+### D-008 · 2026-10-27 · fix
 
 **Symptom** — with **All time** (and any window containing one of them) the Tokens tab showed
 `—` for CodeBuddy's usage total, input and output while `req` read 44,473, and the Dashboard's
@@ -75,7 +89,7 @@ than used as a reason to withhold a number the tracker itself prints.
 window is wholly unmeasured: a share is a fraction of a whole, and an unknown denominator makes the
 fraction unknown in a way a sum does not.
 
-## D-007 · 2026-10-27 · fix
+### D-007 · 2026-10-27 · fix
 
 **Symptom** — the dashboard's window card printed a second figure beside the total
 (`↑2% vs 1.95B`). That figure was the window of the same length immediately before the current one,
@@ -96,7 +110,7 @@ not reported in this window" because one unmeasured row set `tokens` to `None` f
 window. That was the same defect D-008 fixes, so the fallback now only appears when *every* row in
 the window is unmeasured. The paragraph stays so the two entries read in order.
 
-## D-006 · 2026-10-25 · chore
+### D-006 · 2026-10-25 · chore
 
 **Symptom** — the 2026-10-25 read-only audit of this repository existed only as a one-off session
 report: P0 × 1 (BYOK/no-token sources shown as 0 in the merged views), P1 × 12, P2 × 18, plus a
@@ -123,7 +137,7 @@ so the suite and `.github/workflows/ci.yml` are unaffected.
 tree (suite at 52 tests), not HEAD; the document says so in its banner.
 
 
-## D-005 · 2026-10-25 · chore
+### D-005 · 2026-10-25 · chore
 
 **Symptom** — `aut_model` carried two functions with no caller and no test
 (`_classify`, `daily_tokens`), and both the report's docstring and the READMEs
@@ -142,7 +156,7 @@ source read inside one transaction.
 
 **Cost** — none to behaviour; nothing called either function.
 
-## D-004 · 2026-10-25 · fix
+### D-004 · 2026-10-25 · fix
 
 **Symptom** — six more places where the board said something it could not
 support. `tokens_real` treated "no usage flag anywhere in the index" as "every
@@ -177,7 +191,7 @@ gets exit 2 instead of a silent 7-day report. `tokens_real: false` for an index
 without the flag is a downgrade of a claim, not of a number: the tokens are
 still summed, and only the vouch is withdrawn.
 
-## D-003 · 2026-10-25 · fix
+### D-003 · 2026-10-25 · fix
 
 **Symptom** — four places where the board's promises outran its code. `aut json`
 imported the date picker at module level, so the "pure standard library" report
@@ -220,31 +234,7 @@ claimed: the three indexes commit independently, and only each source's own
 numbers come from one moment. A new module is one more import for anything
 that needs a window.
 
-## D-001 · 2026-10-25 · guard
-
-**Symptom** — this repo's `AGENTS.md` declared dimension A, but the repo was not in
-`STANDARD.md` §0, so no audit ever looked at it. It carried none of the A-tier
-shape: no CI, no `docs/`, no `MAINTENANCE` pair, a `.gitignore` without the runtime
-entries, and a CHANGELOG with no `D-###` entry. A declaration nothing checks is a
-claim, not a state.
-
-**Change** — registered as the 18th governed repository (A, 11 of 11) and given the
-shape it claimed: `.github/workflows/ci.yml` (unittest on 3.11 / 3.14),
-`docs/maintenance/tracker-contracts.md` (what each adapter assumes about a tracker's
-index), the `MAINTENANCE` bilingual pair, the §4 runtime ignore entries, and the
-missing README sections — Install, Usage, Troubleshooting, Testing, Repository
-layout, Contributing, License — in both languages, plus the four-label block the
-Chinese page lacked.
-
-**Evidence** — `audit-layout.sh`: 18/18 repos match their dimension's shape;
-`python3 -m unittest discover -s scripts/tests`: 52 tests, OK.
-
-**Cost** — one more document can now drift from `scripts/aut_sources.py`. The
-contracts file states the tie-break: if the two disagree, the code is right and the
-document is a bug. The 0.1.0–0.5.0 notes below stay in their own format; the ledger
-starts here rather than pretending to cover them.
-
-## D-002 · 2026-10-25 · fix
+### D-002 · 2026-10-25 · fix
 
 **Symptom** — a source that reports credits but no tokens (qcut's BYOK routes)
 reached the board as `0`: `aut_sources` already knew the difference, but
@@ -286,6 +276,30 @@ tracker's own index instead; those fields were the one place money still
 crossed the board's boundary. A partly reported window on Sources is still a
 floor (with `tokens_real: false` and a note), while the merged Tokens and
 Dashboard views show `—` rather than an unlabelled floor.
+
+### D-001 · 2026-10-25 · guard
+
+**Symptom** — this repo's `AGENTS.md` declared dimension A, but the repo was not in
+`STANDARD.md` §0, so no audit ever looked at it. It carried none of the A-tier
+shape: no CI, no `docs/`, no `MAINTENANCE` pair, a `.gitignore` without the runtime
+entries, and a CHANGELOG with no `D-###` entry. A declaration nothing checks is a
+claim, not a state.
+
+**Change** — registered as the 18th governed repository (A, 11 of 11) and given the
+shape it claimed: `.github/workflows/ci.yml` (unittest on 3.11 / 3.14),
+`docs/maintenance/tracker-contracts.md` (what each adapter assumes about a tracker's
+index), the `MAINTENANCE` bilingual pair, the §4 runtime ignore entries, and the
+missing README sections — Install, Usage, Troubleshooting, Testing, Repository
+layout, Contributing, License — in both languages, plus the four-label block the
+Chinese page lacked.
+
+**Evidence** — `audit-layout.sh`: 18/18 repos match their dimension's shape;
+`python3 -m unittest discover -s scripts/tests`: 52 tests, OK.
+
+**Cost** — one more document can now drift from `scripts/aut_sources.py`. The
+contracts file states the tie-break: if the two disagree, the code is right and the
+document is a bug. The 0.1.0–0.5.0 notes below stay in their own format; the ledger
+starts here rather than pretending to cover them.
 
 ## 0.5.0
 
