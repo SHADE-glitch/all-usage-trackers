@@ -31,7 +31,9 @@
 
 ## 📊 The six tabs
 
-<p align="center"><img src="docs/screenshots/demo.gif" alt="Switching the window and opening a tab" width="900"></p>
+<p align="center"><img src="docs/screenshots/demo.gif" alt="Stepping through all six tabs of the board" width="900"></p>
+
+<p align="center"><em><b>In the clip:</b> the board opens on the Dashboard and steps through Tools, Skills, Tokens, Usage and Sources. <b>What it shows:</b> three trackers read as one board: a merged window total, tools and skills across all of them, tokens per model, and a Sources tab that reports which indexes are on disk and hands off to that tracker's own TUI.</em></p>
 
 | Tab | What it shows |
 | :--- | :--- |

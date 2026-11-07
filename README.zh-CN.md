@@ -31,7 +31,9 @@
 
 ## 📊 六个 tab
 
-<p align="center"><img src="docs/screenshots/demo.gif" alt="切换统计窗口与标签页" width="900"></p>
+<p align="center"><img src="docs/screenshots/demo.gif" alt="依次切换看板的六个标签页" width="900"></p>
+
+<p align="center"><em><b>动图内容：</b>从仪表盘开始，依次走完工具、技能、Token、用量、数据源五个标签页。<b>展示的功能：</b>三个追踪器合成一张看板：合并后的窗口总量、跨家的工具与技能、按模型分的 Token，以及一个数据源页——列出哪些索引在盘上，并可直接交接给对应追踪器自己的 TUI。</em></p>
 
 | Tab | 显示什么 |
 | :--- | :--- |
