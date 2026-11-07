@@ -9,11 +9,17 @@
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey?logo=linux&logoColor=black)
 [![Repository](https://img.shields.io/badge/repository-GitHub-black?logo=github)](https://github.com/SHADE-glitch/all-usage-trackers)
 
-<p align="center"><img src="docs/screenshots/dashboard.png" alt="The dashboard, running against a demo index" width="900"></p>
-
 **What it is** — a six-tab board over the usage trackers you already run: `cbut` (CodeBuddy), `ocut` (OpenCode) and `qcut` (Qoder CN). It merges their numbers across tools, and still hands the terminal to whichever tracker you pick when you want its full view.
 
 **What it solves** — each tracker answers "how did I use *this* tool". None of them answers "which skill do I actually use across all three", "which model costs me the most this week", or "is this week up or down". `aut` is those three questions.
+
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="The dashboard, running against a demo index" width="900"></p>
+
+<p align="center"><em><b>The board</b> — three trackers merged into one window: a shared total, tools and skills across all of them, tokens per model. Demo indexes, no real machine.</em></p>
+
+<p align="center"><img src="docs/screenshots/demo.gif" alt="Stepping through all six tabs of the board" width="900"></p>
+
+<p align="center"><em><b>In the clip:</b> the board opens on the Dashboard and steps through Tools, Skills, Tokens, Usage and Sources. <b>What it shows:</b> three trackers read as one board: a merged window total, tools and skills across all of them, tokens per model, and a Sources tab that reports which indexes are on disk and hands off to that tracker's own TUI.</em></p>
 
 **How to run** — `./install.sh`, then `aut`.
 
@@ -30,10 +36,6 @@
 - **A hand-off, not a replacement.** `enter` on Sources suspends the board and opens that tracker's own eight-tab TUI; its `q` returns to a re-read board.
 
 ## 📊 The six tabs
-
-<p align="center"><img src="docs/screenshots/demo.gif" alt="Stepping through all six tabs of the board" width="900"></p>
-
-<p align="center"><em><b>In the clip:</b> the board opens on the Dashboard and steps through Tools, Skills, Tokens, Usage and Sources. <b>What it shows:</b> three trackers read as one board: a merged window total, tools and skills across all of them, tokens per model, and a Sources tab that reports which indexes are on disk and hands off to that tracker's own TUI.</em></p>
 
 | Tab | What it shows |
 | :--- | :--- |

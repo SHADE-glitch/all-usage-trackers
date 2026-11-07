@@ -9,11 +9,17 @@
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey?logo=linux&logoColor=black)
 [![Repository](https://img.shields.io/badge/repository-GitHub-black?logo=github)](https://github.com/SHADE-glitch/all-usage-trackers)
 
-<p align="center"><img src="docs/screenshots/dashboard.png" alt="仪表盘（演示索引）" width="900"></p>
-
 **是什么** — 一块盖在你已经在跑的三家追踪器之上的六页看板：`cbut`（CodeBuddy）、`ocut`（OpenCode）、`qcut`（Qoder CN）。它把三家的数字跨工具合起来看，想看某一家完整视图时又把终端交还给它。
 
 **解决什么** — 每家追踪器回答的都是「我**这一个**工具用得怎么样」。没有一家回答「我到底在三个工具里都用了哪些 skill」「这周哪个模型最费」「这周比上周是升是降」。`aut` 就是这三个问题。
+
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="仪表盘（演示索引）" width="900"></p>
+
+<p align="center"><em><b>看板</b> —— 三个追踪器合成一个窗口：合并后的总量、跨家的工具与 skill、按模型分的 token。演示索引，不含真实机器数据。</em></p>
+
+<p align="center"><img src="docs/screenshots/demo.gif" alt="依次切换看板的六个标签页" width="900"></p>
+
+<p align="center"><em><b>动图内容：</b>从仪表盘开始，依次走完工具、技能、Token、用量、数据源五个标签页。<b>展示的功能：</b>三个追踪器合成一张看板：合并后的窗口总量、跨家的工具与技能、按模型分的 Token，以及一个数据源页——列出哪些索引在盘上，并可直接交接给对应追踪器自己的 TUI。</em></p>
 
 **怎么跑** — `./install.sh`，然后 `aut`。
 
@@ -30,10 +36,6 @@
 - **是交接，不是替代。** 在 Sources 上按 `enter` 会挂起看板、打开那家自己的八页 TUI；在那边按 `q` 回到重新读过数据的看板。
 
 ## 📊 六个 tab
-
-<p align="center"><img src="docs/screenshots/demo.gif" alt="依次切换看板的六个标签页" width="900"></p>
-
-<p align="center"><em><b>动图内容：</b>从仪表盘开始，依次走完工具、技能、Token、用量、数据源五个标签页。<b>展示的功能：</b>三个追踪器合成一张看板：合并后的窗口总量、跨家的工具与技能、按模型分的 Token，以及一个数据源页——列出哪些索引在盘上，并可直接交接给对应追踪器自己的 TUI。</em></p>
 
 | Tab | 显示什么 |
 | :--- | :--- |
