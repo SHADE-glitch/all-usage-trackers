@@ -27,6 +27,23 @@
 
 ---
 
+## 📖 Table of Contents
+
+- [✨ Features](#-features)
+- [🚫 What it does not do](#-what-it-does-not-do)
+- [📊 The six tabs](#-the-six-tabs)
+- [🔢 Reading the numbers](#-reading-the-numbers)
+- [⌨️ Keys](#️-keys)
+- [📋 Requirements](#-requirements)
+- [🚀 Install](#-install)
+- [🧭 Usage](#-usage)
+- [🧪 Testing](#-testing)
+- [📁 Repository layout](#-repository-layout)
+- [🧩 Adding a fourth tracker](#-adding-a-fourth-tracker)
+- [🔧 Troubleshooting](#-troubleshooting)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
+
 ## ✨ Features
 
 - **One board, three trackers.** Six tabs — Dashboard, Tools, Skills, Tokens, Usage, Sources — over the SQLite index each tracker already built. Nothing is parsed twice and nothing is written.
@@ -34,6 +51,12 @@
 - **One definition of "tokens".** Every figure is the tracker's own *Usage Total*, stated per source, never the provider's API total.
 - **A per-tab footer.** Only the keys that can act on the current tab are drawn and listened for.
 - **A hand-off, not a replacement.** `enter` on Sources suspends the board and opens that tracker's own eight-tab TUI; its `q` returns to a re-read board.
+
+## 🚫 What it does not do
+
+- **It does not collect anything.** No log parsing, no network, no second copy of the truth: it reads the `usage.db` each tracker already built.
+- **It does not write.** Every connection is `mode=ro`; `r` and `enter` write only through the tracker's own commands.
+- **It does not replace the trackers.** The Sources tab is one key from their full eight-tab view.
 
 ## 📊 The six tabs
 
@@ -69,6 +92,20 @@
  tab Next tab  shift+tab Prev tab  q Quit  r Sync now  d Date  ? Help
 ```
 
+## 🔢 Reading the numbers
+
+- **Tokens are the unit.** No credits, no dollars: the three trackers report credits, credits and dollars respectively, so one money column would present three units as one.
+- **A missing index is not a zero.** A tracker that is not installed, not synced or built by an older schema is skipped in the merges and reported on the Sources tab — never counted as "used nothing".
+- **A missing token figure is not a zero either.** A source that reports credits but no tokens (qcut's BYOK routes) shows `—` on Sources. In the Tokens and Dashboard merges, a model with any unreported call is `—` too; the board never sums only the known rows and calls the result a total.
+- **ok / fail / pending** come from the status the hosts actually write: `completed` is ok; `error`, `incomplete` and `cancelled` are failures; `running`, `backgrounded` and no status at all are pending, which is not a failure.
+- **One model is one row.** The same model name through three trackers is one total with three columns, because "what did this model cost me" has one answer. Names merge case-insensitively; `g` still shows the per-tracker rows when that is what you want.
+- **Tool names merge case-insensitively** (`Read` in one tracker, `read` in another, one row). `Bash` and `shell` stay apart: whether they are the same tool is a guess this app does not make.
+- **One number, labelled.** Every token figure the board prints is the tracker's own **Usage Total** — the definition each tracker's panels use (cbut: prompt + completion + cache hit; ocut: full prompt + output + the hit re-added; qcut: input + output + cache read). The providers' own API totals are no longer read anywhere; a number that says neither input, output nor cache is always the Usage Total.
+- **One bar, one scale.** Every bar in a table shares its scale, so a 12M tracker and an 81M tracker do not draw the same bar. The percentage beside a bar is its share of the window. In the ranked tables the bar is scaled to the largest row; Sources uses the window total, which is the same denominator as the percentage it prints.
+- **Cards grow, then the pane scrolls.** A list card takes the height its rows need instead of truncating to a fixed row count; the dashboard pane scrolls once the screen is full, so nothing is silently cut.
+- **Two numbers on one screen count the same calls.** The Sources tab takes its window from the tab, not from "the last N×24 hours", so it agrees with the KPI strip above it.
+- **There is no `a` key.** The trackers use it for "installed but never used", which has no cross-tool meaning here.
+
 ## ⌨️ Keys
 
 The shared keys are the tracker family's, so a habit learned in `cbut` works here.
@@ -95,26 +132,6 @@ The screen is laid out like the three trackers: the state line (rows, sort, grou
 
 `r` runs the three syncs behind the board instead of handing the terminal over: the status line names the tracker being synced (`syncing CodeBuddy 1/3`), `r` leaves the footer while it runs, and the tab is re-read once at the end. The Dashboard is a read-only summary — it has no selection and no `enter`, because every number on it is one keystroke away on its own tab.
 
-## 🔢 Reading the numbers
-
-- **Tokens are the unit.** No credits, no dollars: the three trackers report credits, credits and dollars respectively, so one money column would present three units as one.
-- **A missing index is not a zero.** A tracker that is not installed, not synced or built by an older schema is skipped in the merges and reported on the Sources tab — never counted as "used nothing".
-- **A missing token figure is not a zero either.** A source that reports credits but no tokens (qcut's BYOK routes) shows `—` on Sources. In the Tokens and Dashboard merges, a model with any unreported call is `—` too; the board never sums only the known rows and calls the result a total.
-- **ok / fail / pending** come from the status the hosts actually write: `completed` is ok; `error`, `incomplete` and `cancelled` are failures; `running`, `backgrounded` and no status at all are pending, which is not a failure.
-- **One model is one row.** The same model name through three trackers is one total with three columns, because "what did this model cost me" has one answer. Names merge case-insensitively; `g` still shows the per-tracker rows when that is what you want.
-- **Tool names merge case-insensitively** (`Read` in one tracker, `read` in another, one row). `Bash` and `shell` stay apart: whether they are the same tool is a guess this app does not make.
-- **One number, labelled.** Every token figure the board prints is the tracker's own **Usage Total** — the definition each tracker's panels use (cbut: prompt + completion + cache hit; ocut: full prompt + output + the hit re-added; qcut: input + output + cache read). The providers' own API totals are no longer read anywhere; a number that says neither input, output nor cache is always the Usage Total.
-- **One bar, one scale.** Every bar in a table shares its scale, so a 12M tracker and an 81M tracker do not draw the same bar. The percentage beside a bar is its share of the window. In the ranked tables the bar is scaled to the largest row; Sources uses the window total, which is the same denominator as the percentage it prints.
-- **Cards grow, then the pane scrolls.** A list card takes the height its rows need instead of truncating to a fixed row count; the dashboard pane scrolls once the screen is full, so nothing is silently cut.
-- **Two numbers on one screen count the same calls.** The Sources tab takes its window from the tab, not from "the last N×24 hours", so it agrees with the KPI strip above it.
-- **There is no `a` key.** The trackers use it for "installed but never used", which has no cross-tool meaning here.
-
-## 🚫 What it does not do
-
-- **It does not collect anything.** No log parsing, no network, no second copy of the truth: it reads the `usage.db` each tracker already built.
-- **It does not write.** Every connection is `mode=ro`; `r` and `enter` write only through the tracker's own commands.
-- **It does not replace the trackers.** The Sources tab is one key from their full eight-tab view.
-
 ## 📋 Requirements
 
 - Python 3.11+ (the board's only dependency is Textual; `aut json`, `aut skills` and `aut sync` are pure standard library).
@@ -126,7 +143,7 @@ The screen is laid out like the three trackers: the state line (rows, sort, grou
 | Textual | see `requirements.txt` | board only — `json` / `skills` / `sync` need no third-party package |
 | Linux | any | reads `~/.local/share/*/usage.db` |
 
-## 📥 Install
+## 🚀 Install
 
 ```bash
 git clone https://github.com/SHADE-glitch/all-usage-trackers.git
@@ -151,19 +168,6 @@ aut --help
 ```
 
 `aut json` takes `1` / `7` / `30` / `0` (= all time) for `--days` — anything else is refused, not silently rounded to 7 — and is stdlib-only, so it works without the venv, which is what makes it usable from a script. `aut skills` reads the same `entity_rows` the Skills tab does, defaults to 30 days (skills are rare), and names each tracker it could not read instead of printing a zero. Direct reads come from each tracker's `skill_reads` table; a tracker that predates it shows `—` and is named under "direct reads unavailable", never a 0.
-
-## 🧯 Troubleshooting
-
-| Symptom | Cause | What to do |
-| :--- | :--- | :--- |
-| a source shows `no db` | that tracker is not installed, or its index was never built | install it and run its `sync`; `aut sync` does that for you |
-| a source shows `error` | its `usage.db` no longer matches the columns `aut` reads | see [the contracts file](docs/maintenance/tracker-contracts.md); the adapter is one entry in `scripts/aut_sources.py` |
-| a source shows `idle` | no calls in the last week — not a fault | nothing |
-| a model shows `—` | that source reported calls but no token figure (for example a BYOK route that only records credits) | check that tracker's own panel; the board will not turn unknown into 0 |
-| a source's note says the index does not record usage | the tracker wrote the calls but not the usage flag, so nothing vouches for the total | the total is a floor; compare against that tracker's own panel |
-| a line says `synced` is missing | this session has not run a sync — the board read the indexes at start | press `r`, or read the numbers as of the app start |
-| `aut: command not found` | `~/.local/bin` not on `PATH` | add it, or re-run `install.sh` with `AUT_BIN_DIR` |
-| the board will not start, `aut json` works | the venv is gone or Textual is missing | re-run `./install.sh` |
 
 ## 🧪 Testing
 
@@ -194,6 +198,19 @@ docs/audit/                  dated read-only audit reports (a snapshot, not curr
 ## 🧩 Adding a fourth tracker
 
 One entry in `SOURCES` in [scripts/aut_sources.py](scripts/aut_sources.py): a key, a label, the database name, the binary, and the SQL expressions that normalise its token and project columns. Every tab picks it up. The contracts file lists what you have to find out about the new tracker first.
+
+## 🔧 Troubleshooting
+
+| Symptom | Cause | What to do |
+| :--- | :--- | :--- |
+| a source shows `no db` | that tracker is not installed, or its index was never built | install it and run its `sync`; `aut sync` does that for you |
+| a source shows `error` | its `usage.db` no longer matches the columns `aut` reads | see [the contracts file](docs/maintenance/tracker-contracts.md); the adapter is one entry in `scripts/aut_sources.py` |
+| a source shows `idle` | no calls in the last week — not a fault | nothing |
+| a model shows `—` | that source reported calls but no token figure (for example a BYOK route that only records credits) | check that tracker's own panel; the board will not turn unknown into 0 |
+| a source's note says the index does not record usage | the tracker wrote the calls but not the usage flag, so nothing vouches for the total | the total is a floor; compare against that tracker's own panel |
+| a line says `synced` is missing | this session has not run a sync — the board read the indexes at start | press `r`, or read the numbers as of the app start |
+| `aut: command not found` | `~/.local/bin` not on `PATH` | add it, or re-run `install.sh` with `AUT_BIN_DIR` |
+| the board will not start, `aut json` works | the venv is gone or Textual is missing | re-run `./install.sh` |
 
 ## 🤝 Contributing
 

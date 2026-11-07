@@ -27,6 +27,23 @@
 
 ---
 
+## 📖 目录
+
+- [✨ 功能](#-功能)
+- [🚫 它不做什么](#-它不做什么)
+- [📊 六个 tab](#-六个-tab)
+- [🔢 怎么读这些数字](#-怎么读这些数字)
+- [⌨️ 按键](#️-按键)
+- [📋 环境要求](#-环境要求)
+- [🚀 安装](#-安装)
+- [🧭 使用](#-使用)
+- [🧪 测试](#-测试)
+- [📁 仓库结构](#-仓库结构)
+- [🧩 加第四个追踪器](#-加第四个追踪器)
+- [🔧 故障排查](#-故障排查)
+- [🤝 参与贡献](#-参与贡献)
+- [📄 许可证](#-许可证)
+
 ## ✨ 功能
 
 - **一块看板，三家追踪器。** 六个 tab——Dashboard、Tools、Skills、Tokens、Usage、Sources——读的都是各家已经建好的 SQLite 索引。不解析第二遍，也不写入。
@@ -34,6 +51,12 @@
 - **「token」只有一个定义。** 每个数字都是那家自己的 **Usage Total**，逐源复述，永远不是 provider 的 API total。
 - **底栏按页给键。** 只画当前页真能动作的键，也只监听这些键。
 - **是交接，不是替代。** 在 Sources 上按 `enter` 会挂起看板、打开那家自己的八页 TUI；在那边按 `q` 回到重新读过数据的看板。
+
+## 🚫 它不做什么
+
+- **它不采集任何东西。** 不解析日志、不联网、不存第二份真相：它读的是每家追踪器已经建好的 `usage.db`。
+- **它不写入。** 每个连接都是 `mode=ro`；`r` 与 `enter` 只通过那家自己的命令去写。
+- **它不替代追踪器。** 从 Sources 到各家完整的八页视图只差一个键。
 
 ## 📊 六个 tab
 
@@ -69,6 +92,20 @@
  tab Next tab  shift+tab Prev tab  q Quit  r Sync now  d Date  ? Help
 ```
 
+## 🔢 怎么读这些数字
+
+- **单位是 token。** 没有 credit，没有美元：三家分别报 credit、credit 和美元，合成一列钱就是把三个单位当成一个。
+- **缺索引不是 0。** 没装、没同步、或由旧 schema 建出来的那一家会在合并里被跳过，并在 Sources 上说明——绝不算作「用了零」。
+- **缺 token 数字也不是 0。** 只报 credit、不报 token 的来源（qcut 的 BYOK 路由）在 Sources 上显示 `—`。Tokens 与 Dashboard 的合并里，只要一个模型有未上报 token 的调用，它也显示 `—`；看板不会只把已知行加起来，再把结果叫作总量。
+- **ok / fail / pending** 来自宿主真实写下的状态：`completed` 是 ok；`error`、`incomplete`、`cancelled` 是失败；`running`、`backgrounded` 以及完全没有状态是 pending，pending 不是失败。
+- **一个模型就是一行。** 同一个模型名穿过三家是一条总量加三列，因为「这个模型花了我多少」只有一个答案。名字按大小写不敏感合并；想看逐家行时 `g` 仍然给你。
+- **工具名按大小写不敏感合并**（一家写 `Read`、另一家写 `read`，合成一行）。`Bash` 与 `shell` 保持分开：它们是不是同一个工具，这个程序不去猜。
+- **一个数，带标签。** 看板打印的每个 token 数字都是那家的 **Usage Total**——各家面板自己用的定义（cbut：prompt + completion + cache hit；ocut：完整 prompt + output + 再加一次命中；qcut：input + output + cache read）。provider 自己的 API total 已经不再读；一个既不说 input、也不说 output 或 cache 的数字，永远是 Usage Total。
+- **一根条，一个刻度。** 一张表里所有条共用刻度，所以 12M 的一家与 81M 的一家不会画出同样长的条。条旁边的百分比是它在本窗口的份额。排行表里的条按最大的那一行缩放；Sources 用窗口总量作分母，和它旁边印的百分比是同一个分母。
+- **卡片先长，然后面板滚动。** 列表卡片取它行数需要的高度，而不是截断到固定行数；屏幕满了之后是面板滚动，所以没有任何东西被悄悄裁掉。
+- **同一屏上的两个数字数的是同一批调用。** Sources 的窗口取自该 tab，而不是「最近 N×24 小时」，所以它与上方的 KPI 条一致。
+- **没有 `a` 键。** 追踪器用它表示「装了但没用过」，这件事在跨工具这里没有意义。
+
 ## ⌨️ 按键
 
 共用的键就是这套追踪器家族的键，在 `cbut` 里养成的习惯在这里照样能用。
@@ -95,27 +132,7 @@
 
 `r` 是在看板背后跑三家同步，而不是把终端交出去：状态行写出正在同步哪一家（`syncing CodeBuddy 1/3`），运行期间 `r` 从底栏消失，结束后整页重读一次。Dashboard 是只读摘要——它没有选中行也没有 `enter`，因为它上面每个数字都在自己那一页上只差一次按键。
 
-## 🔢 怎么读这些数字
-
-- **单位是 token。** 没有 credit，没有美元：三家分别报 credit、credit 和美元，合成一列钱就是把三个单位当成一个。
-- **缺索引不是 0。** 没装、没同步、或由旧 schema 建出来的那一家会在合并里被跳过，并在 Sources 上说明——绝不算作「用了零」。
-- **缺 token 数字也不是 0。** 只报 credit、不报 token 的来源（qcut 的 BYOK 路由）在 Sources 上显示 `—`。Tokens 与 Dashboard 的合并里，只要一个模型有未上报 token 的调用，它也显示 `—`；看板不会只把已知行加起来，再把结果叫作总量。
-- **ok / fail / pending** 来自宿主真实写下的状态：`completed` 是 ok；`error`、`incomplete`、`cancelled` 是失败；`running`、`backgrounded` 以及完全没有状态是 pending，pending 不是失败。
-- **一个模型就是一行。** 同一个模型名穿过三家是一条总量加三列，因为「这个模型花了我多少」只有一个答案。名字按大小写不敏感合并；想看逐家行时 `g` 仍然给你。
-- **工具名按大小写不敏感合并**（一家写 `Read`、另一家写 `read`，合成一行）。`Bash` 与 `shell` 保持分开：它们是不是同一个工具，这个程序不去猜。
-- **一个数，带标签。** 看板打印的每个 token 数字都是那家的 **Usage Total**——各家面板自己用的定义（cbut：prompt + completion + cache hit；ocut：完整 prompt + output + 再加一次命中；qcut：input + output + cache read）。provider 自己的 API total 已经不再读；一个既不说 input、也不说 output 或 cache 的数字，永远是 Usage Total。
-- **一根条，一个刻度。** 一张表里所有条共用刻度，所以 12M 的一家与 81M 的一家不会画出同样长的条。条旁边的百分比是它在本窗口的份额。排行表里的条按最大的那一行缩放；Sources 用窗口总量作分母，和它旁边印的百分比是同一个分母。
-- **卡片先长，然后面板滚动。** 列表卡片取它行数需要的高度，而不是截断到固定行数；屏幕满了之后是面板滚动，所以没有任何东西被悄悄裁掉。
-- **同一屏上的两个数字数的是同一批调用。** Sources 的窗口取自该 tab，而不是「最近 N×24 小时」，所以它与上方的 KPI 条一致。
-- **没有 `a` 键。** 追踪器用它表示「装了但没用过」，这件事在跨工具这里没有意义。
-
-## 🚫 它不做什么
-
-- **它不采集任何东西。** 不解析日志、不联网、不存第二份真相：它读的是每家追踪器已经建好的 `usage.db`。
-- **它不写入。** 每个连接都是 `mode=ro`；`r` 与 `enter` 只通过那家自己的命令去写。
-- **它不替代追踪器。** 从 Sources 到各家完整的八页视图只差一个键。
-
-## 📋 依赖
+## 📋 环境要求
 
 - Python 3.11+（看板唯一的依赖是 Textual；`aut json`、`aut skills` 与 `aut sync` 是纯标准库）。
 - `cbut`、`ocut`、`qcut` 里至少装好并同步过一家。
@@ -126,7 +143,7 @@
 | Textual | 见 `requirements.txt` | 只有看板需要；`json` / `skills` / `sync` 不需要任何第三方包 |
 | Linux | 任意 | 读 `~/.local/share/*/usage.db` |
 
-## 📥 安装
+## 🚀 安装
 
 ```bash
 git clone https://github.com/SHADE-glitch/all-usage-trackers.git
@@ -151,19 +168,6 @@ aut --help
 ```
 
 `aut json` 的 `--days` 接受 `1` / `7` / `30` / `0`（= 全部），其它值会被拒绝而不是被悄悄改成 7；它是纯标准库，不需要 venv——这正是它能被脚本直接调用的原因。`aut skills` 读的就是 Skills 页用的同一个 `entity_rows`，默认 30 天（skill 调用本就稀少），读不到的追踪器会被点名，而不是印一个 0。直接读来自各家 tracker 的 `skill_reads` 表；还没升级到该表的 tracker 显示 `—`，并在「direct reads unavailable」里点名，绝不印 0。
-
-## 🧯 故障排查
-
-| 症状 | 原因 | 怎么办 |
-| :--- | :--- | :--- |
-| 某家显示 `no db` | 那家没装，或索引从未建过 | 装上并跑它自己的 `sync`；`aut sync` 会替你跑 |
-| 某家显示 `error` | 它的 `usage.db` 与 `aut` 读的列对不上了 | 见[契约文件](docs/maintenance/tracker-contracts.md)；适配器就是 `scripts/aut_sources.py` 里的一条 |
-| 某家显示 `idle` | 最近一周没有调用——不是故障 | 不用管 |
-| 某个模型显示 `—` | 那家报了调用，但没报 token（例如只记 credit 的 BYOK 路由） | 先去那家自己的面板核对；看板不会把未知写成 0 |
-| 某家的备注说索引不记录 usage | 那家写了调用却没写 usage 标记，于是没有任何东西为这个总量背书 | 总量是下限；去那家自己的面板核对 |
-| 状态栏没有 `synced` 这一项 | 本次会话还没同步过——看板只是在启动时读了索引 | 按 `r`，或把数字理解为 app 启动那一刻 |
-| `aut: command not found` | `~/.local/bin` 不在 `PATH` 里 | 加进 `PATH`，或用 `AUT_BIN_DIR` 重跑 `install.sh` |
-| 看板起不来，但 `aut json` 正常 | venv 没了或 Textual 缺失 | 重跑 `./install.sh` |
 
 ## 🧪 测试
 
@@ -194,6 +198,19 @@ docs/audit/                 按日期归档的只读审计报告（是快照，�
 ## 🧩 加第四个追踪器
 
 在 [scripts/aut_sources.py](scripts/aut_sources.py) 的 `SOURCES` 里加一条：key、label、数据库名、可执行文件名，以及把它的 token 与项目列归一化的 SQL 表达式。每个 tab 都会自动认到它。先要弄清新家的哪些事，契约文件里列了清单。
+
+## 🔧 故障排查
+
+| 症状 | 原因 | 怎么办 |
+| :--- | :--- | :--- |
+| 某家显示 `no db` | 那家没装，或索引从未建过 | 装上并跑它自己的 `sync`；`aut sync` 会替你跑 |
+| 某家显示 `error` | 它的 `usage.db` 与 `aut` 读的列对不上了 | 见[契约文件](docs/maintenance/tracker-contracts.md)；适配器就是 `scripts/aut_sources.py` 里的一条 |
+| 某家显示 `idle` | 最近一周没有调用——不是故障 | 不用管 |
+| 某个模型显示 `—` | 那家报了调用，但没报 token（例如只记 credit 的 BYOK 路由） | 先去那家自己的面板核对；看板不会把未知写成 0 |
+| 某家的备注说索引不记录 usage | 那家写了调用却没写 usage 标记，于是没有任何东西为这个总量背书 | 总量是下限；去那家自己的面板核对 |
+| 状态栏没有 `synced` 这一项 | 本次会话还没同步过——看板只是在启动时读了索引 | 按 `r`，或把数字理解为 app 启动那一刻 |
+| `aut: command not found` | `~/.local/bin` 不在 `PATH` 里 | 加进 `PATH`，或用 `AUT_BIN_DIR` 重跑 `install.sh` |
+| 看板起不来，但 `aut json` 正常 | venv 没了或 Textual 缺失 | 重跑 `./install.sh` |
 
 ## 🤝 参与贡献
 
