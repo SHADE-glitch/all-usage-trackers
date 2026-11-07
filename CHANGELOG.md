@@ -13,6 +13,20 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+### D-011 · 2026-11-07 · taste
+
+**Symptom** — The board's README pair carried no table of contents while the three trackers it reads all
+do, and two of its own section names differed from the tracker family only in wording
+(Install, Troubleshooting) or in the language they named the environment in.
+
+**Change** — A table of contents on both sides, the tracker section order, and the family names: Install,
+Troubleshooting, and 环境要求 where the Chinese side said 依赖.
+
+**Evidence** — L0 2026-11-07 `python3 -m pytest scripts/tests -q` green; the layout audit reports this
+repository compliant; no committed document referenced a renamed anchor.
+
+**Cost** — Two section anchors change; nothing in the tree cited them.
+
 ### D-010 · 2026-10-31 · chore
 
 **Symptom** — the ledger used level-two headings (`## D-###`) while the other dimension-A ledgers
