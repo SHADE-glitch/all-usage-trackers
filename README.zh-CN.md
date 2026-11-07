@@ -9,6 +9,8 @@
 ![Platform: Linux](https://img.shields.io/badge/platform-Linux-lightgrey?logo=linux&logoColor=black)
 [![Repository](https://img.shields.io/badge/repository-GitHub-black?logo=github)](https://github.com/SHADE-glitch/all-usage-trackers)
 
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="仪表盘（演示索引）" width="900"></p>
+
 **是什么** — 一块盖在你已经在跑的三家追踪器之上的六页看板：`cbut`（CodeBuddy）、`ocut`（OpenCode）、`qcut`（Qoder CN）。它把三家的数字跨工具合起来看，想看某一家完整视图时又把终端交还给它。
 
 **解决什么** — 每家追踪器回答的都是「我**这一个**工具用得怎么样」。没有一家回答「我到底在三个工具里都用了哪些 skill」「这周哪个模型最费」「这周比上周是升是降」。`aut` 就是这三个问题。
@@ -28,6 +30,8 @@
 - **是交接，不是替代。** 在 Sources 上按 `enter` 会挂起看板、打开那家自己的八页 TUI；在那边按 `q` 回到重新读过数据的看板。
 
 ## 📊 六个 tab
+
+<p align="center"><img src="docs/screenshots/demo.gif" alt="切换统计窗口与标签页" width="900"></p>
 
 | Tab | 显示什么 |
 | :--- | :--- |
