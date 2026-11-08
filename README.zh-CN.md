@@ -21,6 +21,10 @@
 
 <p align="center"><em><b>动图内容：</b>从仪表盘开始，依次走完工具、技能、Token、用量、数据源五个标签页。<b>展示的功能：</b>三个追踪器合成一张看板：合并后的窗口总量、跨家的工具与技能、按模型分的 Token，以及一个数据源页——列出哪些索引在盘上，并可直接交接给对应追踪器自己的 TUI。</em></p>
 
+<p align="center"><img src="docs/screenshots/demo-range.gif" alt="把时间范围从 30 天切到 7 天，再切到 1 天" width="900"></p>
+
+<p align="center"><em><b>动图内容：</b> 合并后的仪表盘从 30 天切到 7 天、再切到 1 天，三个索引同时按新窗口重算。 <b>展示的功能：</b> 三个追踪器合成一张看板，一个窗口同时重切所有数据源。</em></p>
+
 **怎么跑** — `./install.sh`，然后 `aut`。
 
 **去哪看** — 不变量与目录结构在 [AGENTS.md](AGENTS.md)；每个适配器对三家索引假定了什么，在 [docs/maintenance/tracker-contracts.md](docs/maintenance/tracker-contracts.md)。
