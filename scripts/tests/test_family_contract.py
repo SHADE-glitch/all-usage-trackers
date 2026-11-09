@@ -183,5 +183,47 @@ class TestSharedPresets(unittest.TestCase):
         self.assertEqual(windows.USAGE_RANGES, GOLDEN["family_contract"]["ranges"])
 
 
+def check_family_rules(repo, root, golden):
+    """This repo's own tree must still carry the signatures the family pins.
+
+    Only files inside ``root`` are read: no sibling source is opened. The four
+    copies of the golden are byte-identical, so each repo can check itself and
+    a unilateral drift fails its own suite.
+    """
+    contract = golden["family_contract"]
+    rules, variants = contract["rules"], contract["variants"]
+    assert rules["maintained"] == ["aut", "cbut", "ocut", "qcut"]
+    assert variants["tcut"]["frozen"] is True
+    v = variants[repo]
+    tui = (root / v["tui"]).read_text(encoding="utf-8")
+
+    eo = rules["enter_open"]
+    assert f"class {eo['subclass']}({eo['base']})" in tui, "Table subclass lost"
+    assert (f'Binding("{eo["key"]}", "{eo["action"]}", "{eo["description"]}")'
+            in tui), "the footer Open binding changed"
+    assert tui.count('DataTable(id="') == len(v["plain_datatable_ids"]), (
+        "a plain DataTable was added or removed without declaring it")
+    for tid in v["plain_datatable_ids"]:
+        assert f'DataTable(id="{tid}"' in tui, f"plain DataTable {tid} lost"
+
+    cf = rules["card_fill"]
+    assert f"def {v['fit_function']}" in tui, "card-fit function lost"
+    assert f"class {v['fit_owner']}" in tui, "the container owning the fit lost"
+    assert cf["spare_to"] in tui and cf["refit"] in tui, "min_height / on_resize lost"
+
+    guard = (root / v["isolation_guard"]).read_text(encoding="utf-8")
+    for literal in v["isolation_literals"]:
+        assert literal in guard, f"isolation guard lost {literal!r}"
+    for path, names in v["guard_tests"].items():
+        text = (root / path).read_text(encoding="utf-8")
+        for name in names:
+            assert f"def {name}" in text, f"{path} lost {name}"
+
+
+class TestFamilyRules(unittest.TestCase):
+    def test_the_board_matches_the_family_rule_signatures(self):
+        check_family_rules("aut", Path(__file__).resolve().parents[2], GOLDEN)
+
+
 if __name__ == "__main__":
     unittest.main()
