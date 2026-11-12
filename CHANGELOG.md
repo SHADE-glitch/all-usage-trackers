@@ -13,6 +13,24 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+### D-012 · 2026-11-12 · guard
+
+**Symptom** — This was the only governed repository with no copy of the dimension-A layout guard the four
+trackers carry: the root floor, the one-line dimension pointer and the runtime-ignore agreement were
+unenforced, so the machine-wide audit could only record the missing snapshot.
+
+**Change** — Added `scripts/tests/test_conventions.py`, modelled on the four trackers: nine checks over the
+root files and directories, the dimension pointer and the anti-copy rule (numbered headings only), and the
+runtime ignore list in both directions — the patterns are present, and nothing is tracked under them.
+Standard library only, offline, writes nothing.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests -p test_conventions.py` → 9 tests OK;
+`bash ~/.agents/scripts/audit.sh` section 13 now counts 20 snapshots and names this repository among them
+(it was the missing one).
+
+**Cost** — The standard's titles are copied by design (CI has no access to `~/.agents`); section 13 reports
+drift. This repository's ledger has no `Commit` field, so the hash is not recorded in the entry.
+
 ### D-011 · 2026-11-07 · taste
 
 **Symptom** — The board's README pair carried no table of contents while the three trackers it reads all
