@@ -13,6 +13,16 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+### D-013 · 2026-11-12 · docs
+
+**Symptom** — The project-level rules pointer block in AGENTS.md used bare `@~/.agents/standards/...` imports to pull in the machine-wide standard. That only delivers the rule text to agents that expand `@` imports or read `opencode.json`; an agent that does neither holds the pointer and none of the rule text.
+
+**Change** — Replaced the two `@` imports with plain backticked absolute paths (`~/.agents/standards/STANDARD.md`, `~/.agents/standards/dimensions/<tier>.md`). The rule text is now delivered by the tool-neutral global behavior contract (GLOBAL.md) before the first edit, so the pointer works for every agent regardless of import expansion. No rule text was duplicated or changed — only the pointer form.
+
+**Evidence** — `python3 -m unittest discover -s scripts/tests -q` → 103 tests OK (exit 0); the change sits inside the pointer block and does not touch heading counts or section structure.
+
+**Cost** — The pointer is a local copy of the instruction; the tool-neutral contract is what carries the rule text. Whether that text actually reaches a session is a per-tool check, not a repository guard.
+
 ### D-012 · 2026-11-12 · guard
 
 **Symptom** — This was the only governed repository with no copy of the dimension-A layout guard the four
