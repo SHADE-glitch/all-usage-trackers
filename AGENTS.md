@@ -6,10 +6,9 @@ Guidance for AI coding agents working in this repository.
 > `~/.agents/standards/STANDARD.md` and the dimension-A detail in
 > `~/.agents/standards/dimensions/a.md`. Neither is restated here.
 >
-> **Read these before the first edit** (bare `@` imports — CodeBuddy expands them; opencode reads
-> the same two from `opencode.json`):
-> @~/.agents/standards/STANDARD.md
-> @~/.agents/standards/dimensions/a.md
+> **Read these before the first edit:**
+> `~/.agents/standards/STANDARD.md`
+> `~/.agents/standards/dimensions/a.md`
 
 ## What this is
 
