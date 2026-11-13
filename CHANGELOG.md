@@ -721,3 +721,16 @@ hand-off to a tracker's own TUI stopped repainting the board.
   name (`model_responses` vs `model_calls`) and column names
   (`prompt/completion_tokens`, `input/output_tokens`, `total_tokens`); keeping one
   expression per source is what makes adding a fourth tracker a one-entry change.
+
+### D-015 · 2026-11-13 · chore
+
+Symptom   `AGENTS.md` only pointed at the machine-wide standard. A session that cannot read
+          `~/.agents` silently lost every shared rule, while the pointer still looked well-formed.
+Change    Carried the shared floor and this repository's dimension card inline, in a generated
+          `standards-core` block rendered by `render_standards.py`; the dimension line now
+          describes the block instead of delegating to a path outside the checkout.
+Evidence  `python3 ~/.agents/scripts/render_standards.py --check .` reports the block in sync, the
+          repository's own guard and suite are green, and `bash ~/.agents/scripts/audit.sh` exits 0.
+Cost      `AGENTS.md` grows by about 10.5 KB, paid on every session read; the copy can drift, so the
+          drift check is the only thing keeping it honest and it exists only on this machine.
+Commit    8aebfde
