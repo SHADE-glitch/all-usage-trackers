@@ -13,6 +13,22 @@ Two kinds of entry appear below, both newest-first:
   They are deliberately not backfilled into `D-###`: a record invented after the
   fact is not a record.
 
+### D-014 · 2026-11-13 · chore
+
+**Symptom** — the repository carried an `opencode.json` whose whole content was the two standard
+pointers `AGENTS.md` already lists. A second copy of one delivery instruction, with no guard able to
+tell when it went stale.
+
+**Change** — removed `opencode.json` from the root layer and from the guard's `ROOT_FILES`;
+`STANDARD.md` §1 no longer requires it. Delivery is the pointer block plus the machine-level
+`GLOBAL.md` contract.
+
+**Evidence** — `python3 scripts/tests/test_conventions.py` exits 0; `bash ~/.agents/scripts/audit.sh`
+exits 0 (every governed repository passes the layout check).
+
+**Cost** — nothing per-assistant remains to keep in sync, and nothing local can detect an agent that
+skips the pointer. The file it replaced had the same blind spot.
+
 ### D-013 · 2026-11-12 · docs
 
 **Symptom** — The project-level rules pointer block in AGENTS.md used bare `@~/.agents/standards/...` imports to pull in the machine-wide standard. That only delivers the rule text to agents that expand `@` imports or read `opencode.json`; an agent that does neither holds the pointer and none of the rule text.

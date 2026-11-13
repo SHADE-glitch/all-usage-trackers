@@ -48,7 +48,6 @@ ROOT_FILES = (
     "FAMILY_CONTRACT.md",
     "LICENSE",
     ".gitignore",
-    "opencode.json",
     "pyproject.toml",
 )
 ROOT_DIRS = ("docs", ".github/workflows")
